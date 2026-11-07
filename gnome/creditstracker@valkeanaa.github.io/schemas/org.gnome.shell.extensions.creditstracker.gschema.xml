@@ -6,5 +6,10 @@
       <summary>Show percentage in the top bar</summary>
       <description>Show the highest usage percentage next to the top-bar icon.</description>
     </key>
+    <key name="panel-account" type="s">
+      <default>''</default>
+      <summary>Account shown in the top bar</summary>
+      <description>Id of the account whose 5-hour and weekly usage appear next to the icon. Empty: the account with the highest usage.</description>
+    </key>
   </schema>
 </schemalist>

@@ -424,14 +424,40 @@ const Indicator = GObject.registerClass({
     // ── rendering ──
 
     _update() {
-        const pct = this._status?.summary?.percent;
-        const show = this._settings.get_boolean('show-percent') && pct !== null && pct !== undefined;
-        this._panelLabel.text = show ? `${Math.round(pct)}%` : '';
-        this._panelLabel.visible = show;
+        const text = this._settings.get_boolean('show-percent') ? this._panelText() : '';
+        this._panelLabel.text = text;
+        this._panelLabel.visible = !!text;
+        this._refreshAccountChoices();
         // Rebuild while closed too, so the menu is never empty and opens on current data.
         // Don't rebuild it under the user's fingers while a form is being typed in.
         if (!this._addForm && !this._edit)
             this._render();
+    }
+
+    // The chosen account (or, on "Auto", the one with the highest usage): "5h% · week%".
+    _panelAccount() {
+        const accounts = this._status?.accounts ?? [];
+        const auto = this._status?.summary?.account;
+        const id = this._settings.get_string('panel-account') || auto;
+        return accounts.find(a => a.id === id) ?? accounts.find(a => a.id === auto) ?? null;
+    }
+
+    _panelText() {
+        const acc = this._panelAccount();
+        if (!acc) {
+            const pct = this._status?.summary?.percent;
+            return pct === null || pct === undefined ? '' : `${Math.round(pct)}%`;
+        }
+        const fmt = m => (m && typeof m.percent === 'number' ? `${Math.round(m.idle ? 0 : m.percent)}%` : null);
+        const parts = [
+            fmt(acc.metrics.find(m => m.key === 'session')),
+            fmt(acc.metrics.find(m => m.key === 'weekly_all' || m.key === 'weekly')),
+        ].filter(Boolean);
+        if (parts.length)
+            return parts.join(' · ');
+        // Accounts without 5h/weekly windows (Copilot, command accounts): their highest metric.
+        const worst = Math.max(-1, ...acc.metrics.map(m => (typeof m.percent === 'number' ? m.percent : -1)));
+        return worst >= 0 ? `${Math.round(worst)}%` : '';
     }
 
     _item(child, extraClass = '') {
@@ -788,12 +814,34 @@ const Indicator = GObject.registerClass({
             this._settings.get_boolean('show-percent'));
         this._pctSwitch.connect('toggled', (_i, state) => this._settings.set_boolean('show-percent', state));
         sub.menu.addMenuItem(this._pctSwitch);
+        sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Top bar account (5h · week)'));
+        this._accountChoices = new PopupMenu.PopupMenuSection();
+        this._accountChoicesKey = null;
+        sub.menu.addMenuItem(this._accountChoices);
+        sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         sub.menu.addAction('Edit config file', () => {
             const path = this._status?.config_path ??
                 GLib.build_filenamev([GLib.get_user_config_dir(), 'creditstracker', 'config.json']);
             openUri(GLib.filename_to_uri(path, null));
         });
         this.menu.addMenuItem(sub);
+    }
+
+    // Rebuilt only when the account list or the choice changes, so an open submenu doesn't flicker.
+    _refreshAccountChoices() {
+        if (!this._accountChoices)
+            return;
+        const accounts = (this._status?.accounts ?? []).filter(a => a.metrics?.some(m => typeof m.percent === 'number'));
+        const chosen = this._settings.get_string('panel-account');
+        const key = JSON.stringify([chosen, accounts.map(a => [a.id, a.label])]);
+        if (key === this._accountChoicesKey)
+            return;
+        this._accountChoicesKey = key;
+        this._accountChoices.removeAll();
+        for (const [id, name] of [['', 'Auto (highest usage)'], ...accounts.map(a => [a.id, a.label])]) {
+            const item = this._accountChoices.addAction(name, () => this._settings.set_string('panel-account', id));
+            item.setOrnament(id === chosen ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
+        }
     }
 
     destroy() {
