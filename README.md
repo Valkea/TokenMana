@@ -20,6 +20,10 @@ the two UIs stay thin and behave identically.
                       # Ubuntu: installs the GNOME extension (log out/in once, then enable)
 ```
 
+On Ubuntu, re-running `./install.sh` after an update reloads the running extension in place, with no log out:
+`extension.js` is a small loader that imports a fresh copy of `indicator.js` (the whole UI) on each enable.
+Only changes to `extension.js`, `metadata.json` or the settings schema need a log out/in.
+
 macOS needs only the Xcode Command Line Tools (no Xcode). Turn on *Settings → Launch at Login* in the menu.
 
 ## Accounts

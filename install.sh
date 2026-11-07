@@ -18,6 +18,7 @@ DEST="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID"
 mkdir -p "$DEST" "$HOME/.local/bin"
 cp -r "$ROOT/gnome/$UUID/." "$DEST/"
 cp "$ROOT/core/ctrack.py" "$DEST/ctrack.py"
+glib-compile-schemas "$DEST/schemas"
 
 cat > "$HOME/.local/bin/ctrack" <<EOF
 #!/bin/sh
@@ -30,8 +31,11 @@ python3 -I "$DEST/ctrack.py" status --cached --json >/dev/null
 
 echo "Installed extension to $DEST and CLI to ~/.local/bin/ctrack"
 if gnome-extensions info "$UUID" >/dev/null 2>&1; then
+  # extension.js re-imports a fresh copy of indicator.js on every enable: this applies the update live.
+  gnome-extensions disable "$UUID" 2>/dev/null || true
   gnome-extensions enable "$UUID"
-  echo "Enabled. After an update, log out/in (Wayland) so GNOME reloads the extension code."
+  echo "Reloaded the running extension."
+  echo "(Changes to extension.js, metadata.json or the settings schema still need a log out/in.)"
 else
   echo "GNOME only discovers new extensions at login: log out and back in once, then run:"
   echo "  gnome-extensions enable $UUID"

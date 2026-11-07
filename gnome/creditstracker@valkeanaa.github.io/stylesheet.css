@@ -33,7 +33,7 @@
 .ct-value { font-size: 9pt; font-weight: bold; font-feature-settings: "tnum"; }
 .ct-mono { font-family: monospace; font-size: 8.5pt; color: #9a9a9a; }
 
-.ct-track { width: 340px; height: 5px; border-radius: 3px; background-color: rgba(127, 127, 127, 0.25); }
+.ct-track { height: 5px; border-radius: 3px; background-color: rgba(127, 127, 127, 0.25); }
 .ct-fill { height: 5px; border-radius: 3px; }
 .ct-green { background-color: #33d17a; }
 .ct-orange { background-color: #ff9f0a; }

@@ -2,7 +2,14 @@
   "uuid": "creditstracker@valkeanaa.github.io",
   "name": "CreditsTracker",
   "description": "Usage, limits, reset times and spend of your coding-assistant accounts (Claude, Codex, Copilot, or your own command) in the top bar, with one-click ping to start session timers.",
-  "shell-version": ["45", "46", "47", "48", "49"],
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49"
+  ],
   "version-name": "0.1.0",
-  "url": "https://github.com/valkeanaa/CreditsTracker"
+  "url": "https://github.com/valkeanaa/CreditsTracker",
+  "settings-schema": "org.gnome.shell.extensions.creditstracker"
 }
