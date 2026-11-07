@@ -11,6 +11,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private var cancellables: Set<AnyCancellable> = []
     private var structure = ""
     private var metricItems: [String: NSMenuItem] = [:]
+    private var stripe: NSColor?  // colour of the group being built
     private var layout = MetricLayout(valueRight: 0, barLeft: 0, resetLeft: 0)
     private var updateQueued = false
 
@@ -59,6 +60,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         } else {
             // Same layout: refresh bars/countdowns in place (keeps open submenus open).
             for acc in store.activeAccounts {
+                stripe = groupColor(acc.group)
                 for m in acc.metrics {
                     if let item = metricItems["\(acc.id)/\(m.key)"] { configure(item, metric: m) }
                 }
@@ -80,7 +82,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     /// Everything that changes the list of items (not just the numbers in them).
     private func structureSignature() -> String {
-        var parts = [store.groups.joined(separator: ","), store.loadError ?? "", "\(store.refreshing)", "\(showPercent)", "\(store.launchAtLogin)",
+        var parts = [store.groups.joined(separator: ","), "\(store.status?.groupColors ?? [:])", store.loadError ?? "", "\(store.refreshing)", "\(showPercent)", "\(store.launchAtLogin)",
                      "\(store.status == nil)"]
         for a in store.status?.accounts ?? [] {
             parts.append([a.id, a.label, a.group ?? "", a.status, a.plan ?? "", a.identity ?? "", a.error ?? "", a.hint ?? "",
@@ -115,9 +117,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         for acc in accounts {
             if currentGroup != .some(acc.group) {
                 currentGroup = .some(acc.group)
+                stripe = nil
                 menu.addItem(.separator())
                 if grouped {
                     if menu.numberOfItems > 2 { menu.addItem(spacer()) }
+                    stripe = groupColor(acc.group)
                     menu.addItem(groupHeader(acc.group, accounts: accounts.filter { $0.group == acc.group }))
                 }
             } else {
@@ -125,7 +129,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             }
             if acc.isSetup {
                 let item = NSMenuItem(title: acc.label, action: nil, keyEquivalent: "")
-                item.image = VendorImage.badge(acc.vendor)
+                item.image = img(VendorImage.badge(acc.vendor), tall: true)
                 if #available(macOS 14.4, *) { item.subtitle = acc.host.map { "Not signed in · \($0)" } ?? "Not signed in" }
                 item.toolTip = acc.error
                 item.submenu = accountMenu(acc)
@@ -135,20 +139,25 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             }
         }
 
+        stripe = nil
         menu.addItem(.separator())
         let idle = store.activeAccounts.filter { $0.canPing && $0.hasIdleSession }
         if !idle.isEmpty {
             let ping = action(idle.count == 1 ? "Ping Idle Session" : "Ping \(idle.count) Idle Sessions",
                               #selector(pingIdle), symbol: "bolt.fill")
             if #available(macOS 14.4, *) { ping.subtitle = "Starts their 5h timers (smallest model, low effort)" }
+            ping.image = img(ping.image)
             menu.addItem(ping)
         }
         let refresh = action(store.refreshing ? "Refreshing…" : "Refresh", #selector(refresh), key: "r",
                              symbol: "arrow.clockwise")
         refresh.isEnabled = !store.refreshing
-        menu.addItem(refresh)
-        menu.addItem(action("Add Account…", #selector(showAddAccount), key: "n", symbol: "plus"))
-        menu.addItem(settingsItem())
+        let add = action("Add Account…", #selector(showAddAccount), key: "n", symbol: "plus")
+        let settings = settingsItem()
+        for item in [refresh, add, settings] {
+            item.image = img(item.image)
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
         menu.addItem(action("Quit CreditsTracker", #selector(quit), key: "q"))
     }
@@ -167,7 +176,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let head = NSMenuItem(title: acc.label, action: nil, keyEquivalent: "")
         head.attributedTitle = NSAttributedString(string: acc.label, attributes: [
             .font: NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)])
-        head.image = VendorImage.badge(acc.vendor)
+        head.image = img(VendorImage.badge(acc.vendor), tall: true)
         if #available(macOS 14.4, *) {
             head.subtitle = [acc.plan, acc.identity].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         }
@@ -206,7 +215,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// One aligned row per metric:  ◷ Session · 5h   79%  ▬▬▬▬▭▭  3h 11m · 05:00
     private func configure(_ item: NSMenuItem, metric m: Metric) {
         item.attributedTitle = MetricRow.title(m, layout: layout, now: store.now)
-        item.image = MetricRow.icon(m)
+        item.image = img(MetricRow.icon(m))
         if #available(macOS 14.4, *) { item.subtitle = nil }
         item.toolTip = [m.label, m.text, Fmt.resetLine(m, now: store.now)].compactMap { $0 }.joined(separator: " — ")
     }
@@ -217,7 +226,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         item.target = action == nil ? nil : self
         item.representedObject = represented
         item.indentationLevel = 0
-        item.image = image
+        item.image = img(image)
         return item
     }
 
@@ -254,6 +263,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return sub
     }
 
+    private func groupColor(_ group: String?) -> NSColor? {
+        guard let group else { return nil }
+        return MenuIcons.color(named: store.status?.groupColors?[group])
+    }
+
+    private func img(_ icon: NSImage?, tall: Bool = false) -> NSImage {
+        MenuIcons.striped(icon, color: stripe, tall: tall)
+    }
+
     /// Blank standard item with a tiny font: a small vertical gap (separators can't be doubled).
     private func spacer() -> NSMenuItem {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -273,8 +291,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let symbol = ["work", "pro", "client", "company", "job", "office", "boulot"].contains { lower.contains($0) } ? "briefcase.fill"
             : ["perso", "home", "private", "privé", "me"].contains { lower.contains($0) } ? "person.fill"
             : name == nil ? "tray.fill" : "folder.fill"
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
+        item.image = img(NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold)))
 
         let sub = NSMenu()
         sub.autoenablesItems = false
@@ -287,6 +305,17 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                            symbol: "arrow.clockwise"))
         if let name {
             sub.addItem(.separator())
+            let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
+            colorItem.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: nil)
+            let colors = NSMenu()
+            for (cname, color) in MenuIcons.palette {
+                let c = action(cname.capitalized, #selector(setGroupColor(_:)), represented: [name, cname])
+                c.image = MenuIcons.dot(color)
+                c.state = store.status?.groupColors?[name] == cname ? .on : .off
+                colors.addItem(c)
+            }
+            colorItem.submenu = colors
+            sub.addItem(colorItem)
             sub.addItem(action("Rename Group…", #selector(renameGroup(_:)), represented: name, symbol: "pencil"))
         }
         item.submenu = sub
@@ -455,6 +484,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let ids = sender.representedObject as? [String] else { return }
         Task { for id in ids { _ = try? await Core.run(["status", "--json", "--compact", "--force", id]) }
                await store.load(["--cached"]) }
+    }
+
+    @objc private func setGroupColor(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
+        Task {
+            _ = try? await Core.run(["group-color", pair[0], pair[1], "--json"])
+            await store.load(["--cached"])
+        }
     }
 
     @objc private func renameGroup(_ sender: NSMenuItem) {

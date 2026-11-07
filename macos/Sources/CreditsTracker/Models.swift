@@ -7,6 +7,7 @@ struct StatusResult: Decodable {
     let configPath: String?
     let summary: Summary?
     let groups: [String]?
+    let groupColors: [String: String]?
     let accounts: [Account]
 
     static func decode(_ data: Data) throws -> StatusResult {

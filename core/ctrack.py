@@ -959,10 +959,29 @@ def cmd_rename_group(args):
                 a.pop("group", None)
             n += 1
     cfg["groups"] = [new if g.casefold() == old else g for g in cfg.get("groups") or [] if new or g.casefold() != old]
+    colors = cfg.get("group_colors") or {}
+    for k in [k for k in colors if k.casefold() == old]:
+        color = colors.pop(k)
+        if new:
+            colors[new] = color
+    if colors:
+        cfg["group_colors"] = colors
+    else:
+        cfg.pop("group_colors", None)
     if not cfg["groups"]:
         cfg.pop("groups")
     write_json(CONFIG_PATH, cfg)
     print(json.dumps({"renamed": n}) if args.json else f"renamed group on {n} account(s)")
+    return 0
+
+
+def cmd_group_color(args):
+    cfg = load_config()
+    colors = {k: v for k, v in (cfg.get("group_colors") or {}).items() if k.casefold() != args.group.casefold()}
+    colors[canonical_group(cfg, args.group)] = args.color
+    cfg["group_colors"] = colors
+    write_json(CONFIG_PATH, cfg)
+    print(json.dumps({"group": args.group, "color": args.color}) if args.json else f"{args.group}: {args.color}")
     return 0
 
 
@@ -1087,6 +1106,15 @@ def canonical_group(cfg, name):
     return name
 
 
+GROUP_PALETTE = ["blue", "green", "purple", "orange", "pink", "teal", "red", "gray"]
+
+
+def group_colors(cfg, groups):
+    """Configured "group_colors" or a palette colour by position."""
+    conf = {k.casefold(): v for k, v in (cfg.get("group_colors") or {}).items()}
+    return {g: conf.get(g.casefold()) or GROUP_PALETTE[i % len(GROUP_PALETTE)] for i, g in enumerate(groups)}
+
+
 def group_rank(cfg, group):
     """Optional config "groups": ["Work", "Personal"] fixes the order; others alphabetical; ungrouped last."""
     order = [g.casefold() for g in cfg.get("groups") or []]
@@ -1116,7 +1144,8 @@ def collect(cfg, ids=None, force=False, cached=False):
     groups = sorted({a["group"] for a in out if a["group"]} | set(cfg.get("groups") or []),
                     key=lambda g: group_rank(cfg, g))
     return {"version": 1, "generated_at": iso(now), "refresh_minutes": cfg.get("refresh_minutes", DEFAULT_REFRESH_MIN),
-            "config_path": CONFIG_PATH, "summary": summarize(cfg, out), "groups": groups, "accounts": out}
+            "config_path": CONFIG_PATH, "summary": summarize(cfg, out), "groups": groups,
+            "group_colors": group_colors(cfg, groups), "accounts": out}
 
 
 # ───────────────────────────── CLI ──────────────────────────────────────────
@@ -1253,6 +1282,10 @@ def main(argv=None):
     rg.add_argument("old")
     rg.add_argument("new")
     rg.add_argument("--json", action="store_true")
+    gc = sub.add_parser("group-color", help="set a group's colour (" + ", ".join(GROUP_PALETTE) + ")")
+    gc.add_argument("group")
+    gc.add_argument("color", choices=GROUP_PALETTE)
+    gc.add_argument("--json", action="store_true")
     rm = sub.add_parser("remove", help="remove an account from the config (and its stored token)")
     rm.add_argument("account")
     rm.add_argument("--json", action="store_true")
@@ -1260,7 +1293,7 @@ def main(argv=None):
     i.add_argument("--force", action="store_true")
     sub.add_parser("paths")
     args = ap.parse_args(argv)
-    handlers = {"status": cmd_status, "ping": cmd_ping, "login": cmd_login, "add": cmd_add, "edit": cmd_edit, "rename-group": cmd_rename_group, "remove": cmd_remove,
+    handlers = {"status": cmd_status, "ping": cmd_ping, "login": cmd_login, "add": cmd_add, "edit": cmd_edit, "rename-group": cmd_rename_group, "group-color": cmd_group_color, "remove": cmd_remove,
                 "init": cmd_init, "paths": cmd_paths}
     if not args.cmd:
         args = ap.parse_args(["status"] + (argv or sys.argv[1:]))

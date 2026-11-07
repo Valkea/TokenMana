@@ -43,7 +43,9 @@ group or change its GitHub host.
 **Groups** (e.g. *Work* / *Personal*): give accounts a group when adding or editing them, or on macOS use the
 account's submenu → *Move to Group ▸*. The menu then shows one section per group, with accounts sorted by name and
 ungrouped accounts under *Other*. Group names ignore case (`work` joins `Work`). To set the order of the sections,
-add `"groups": ["Work", "Personal"]` to the config; otherwise they are alphabetical.
+add `"groups": ["Work", "Personal"]` to the config; otherwise they are alphabetical. Each group has a colour bar
+along the left of its rows: pick it from the group header's submenu → *Color*, or with
+`ctrack group-color Work blue` (blue, green, purple, orange, pink, teal, red, gray).
 
 | Type | Shows | Data source |
 |---|---|---|

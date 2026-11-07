@@ -108,6 +108,46 @@ enum MenuIcons {
         }
     }
 
+    static let palette: [(name: String, color: NSColor)] = [
+        ("blue", .systemBlue), ("green", .systemGreen), ("purple", .systemPurple), ("orange", .systemOrange),
+        ("pink", .systemPink), ("teal", .systemTeal), ("red", .systemRed), ("gray", .systemGray)]
+
+    static func color(named name: String?) -> NSColor? {
+        palette.first { $0.name == name }?.color
+    }
+
+    /// The item's icon with a coloured group bar along its left edge (a standard menu-item image).
+    /// Every top-level item uses the same width, so titles stay aligned with or without a bar.
+    static func striped(_ icon: NSImage?, color: NSColor?, tall: Bool = false) -> NSImage {
+        let size = NSSize(width: 27, height: tall ? 30 : 20)
+        return NSImage(size: size, flipped: false) { rect in
+            if let icon {
+                let s = icon.size
+                let scale = min(1, 16 / max(s.width, s.height))
+                let w = s.width * scale, h = s.height * scale
+                let r = NSRect(x: 10 + (16 - w) / 2, y: (rect.height - h) / 2, width: w, height: h)
+                icon.draw(in: r)
+                if icon.isTemplate {  // composited images lose template tinting: tint for the current appearance
+                    NSColor.labelColor.set()
+                    r.fill(using: .sourceAtop)
+                }
+            }
+            if let color {
+                color.setFill()
+                NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 4, height: rect.height), xRadius: 2, yRadius: 2).fill()
+            }
+            return true
+        }
+    }
+
+    static func dot(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+    }
+
     static func symbol(_ name: String, _ color: NSColor) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color]))
