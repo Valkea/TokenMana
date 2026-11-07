@@ -100,6 +100,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private func rebuild() {
         menu.removeAllItems()
         metricItems.removeAll()
+        iconSpecs.removeAll()
 
         let header = NSMenuItem(title: "Coding Assistants", action: nil, keyEquivalent: "")
         header.tag = Tag.header
@@ -129,7 +130,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             }
             if acc.isSetup {
                 let item = NSMenuItem(title: acc.label, action: nil, keyEquivalent: "")
-                item.image = img(VendorImage.badge(acc.vendor), tall: true)
+                setIcon(item, VendorImage.badge(acc.vendor), tall: true)
                 if #available(macOS 14.4, *) { item.subtitle = acc.host.map { "Not signed in · \($0)" } ?? "Not signed in" }
                 item.toolTip = acc.error
                 item.submenu = accountMenu(acc)
@@ -160,6 +161,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(action("Quit CreditsTracker", #selector(quit), key: "q"))
+        joinBars()
     }
 
     private func setHeaderSubtitle(_ item: NSMenuItem) {
@@ -176,7 +178,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let head = NSMenuItem(title: acc.label, action: nil, keyEquivalent: "")
         head.attributedTitle = NSAttributedString(string: acc.label, attributes: [
             .font: NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)])
-        head.image = img(VendorImage.badge(acc.vendor), tall: true)
+        setIcon(head, VendorImage.badge(acc.vendor), tall: true)
         if #available(macOS 14.4, *) {
             head.subtitle = [acc.plan, acc.identity].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         }
@@ -215,7 +217,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// One aligned row per metric:  ◷ Session · 5h   79%  ▬▬▬▬▭▭  3h 11m · 05:00
     private func configure(_ item: NSMenuItem, metric m: Metric) {
         item.attributedTitle = MetricRow.title(m, layout: layout, now: store.now)
-        item.image = img(MetricRow.icon(m))
+        setIcon(item, MetricRow.icon(m))
         if #available(macOS 14.4, *) { item.subtitle = nil }
         item.toolTip = [m.label, m.text, Fmt.resetLine(m, now: store.now)].compactMap { $0 }.joined(separator: " — ")
     }
@@ -226,7 +228,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         item.target = action == nil ? nil : self
         item.representedObject = represented
         item.indentationLevel = 0
-        item.image = img(image)
+        setIcon(item, image)
         return item
     }
 
@@ -272,6 +274,43 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         MenuIcons.striped(icon, color: stripe, tall: tall)
     }
 
+    private struct IconSpec { var icon: NSImage?; var color: NSColor?; var tall: Bool; var up = false; var down = false }
+    private var iconSpecs: [ObjectIdentifier: IconSpec] = [:]
+
+    /// Sets a striped icon and remembers how it was made, so the bars can be joined afterwards.
+    private func setIcon(_ item: NSMenuItem, _ icon: NSImage?, tall: Bool = false) {
+        var spec = iconSpecs[ObjectIdentifier(item)] ?? IconSpec(icon: icon, color: stripe, tall: tall)
+        spec.icon = icon
+        spec.color = stripe
+        spec.tall = tall
+        iconSpecs[ObjectIdentifier(item)] = spec
+        item.image = MenuIcons.striped(icon, color: spec.color, tall: tall, up: spec.up, down: spec.down)
+    }
+
+    /// Extend each bar towards the previous/next row of the same group (across separators, not across groups).
+    private func joinBars() {
+        let items = menu.items
+        func neighbour(_ i: Int, _ step: Int) -> NSMenuItem? {
+            var j = i + step
+            while j >= 0 && j < items.count {
+                if !items[j].isSeparatorItem { return items[j] }
+                j += step
+            }
+            return nil
+        }
+        for (i, item) in items.enumerated() {
+            guard var spec = iconSpecs[ObjectIdentifier(item)], let color = spec.color else { continue }
+            func same(_ other: NSMenuItem?) -> Bool {
+                guard let other, let c = iconSpecs[ObjectIdentifier(other)]?.color else { return false }
+                return c == color
+            }
+            spec.up = same(neighbour(i, -1))
+            spec.down = same(neighbour(i, 1))
+            iconSpecs[ObjectIdentifier(item)] = spec
+            item.image = MenuIcons.striped(spec.icon, color: color, tall: spec.tall, up: spec.up, down: spec.down)
+        }
+    }
+
     /// Blank standard item with a tiny font: a small vertical gap (separators can't be doubled).
     private func spacer() -> NSMenuItem {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -291,7 +330,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let symbol = ["work", "pro", "client", "company", "job", "office", "boulot"].contains { lower.contains($0) } ? "briefcase.fill"
             : ["perso", "home", "private", "privé", "me"].contains { lower.contains($0) } ? "person.fill"
             : name == nil ? "tray.fill" : "folder.fill"
-        item.image = img(NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+        setIcon(item, NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold)))
 
         let sub = NSMenu()
