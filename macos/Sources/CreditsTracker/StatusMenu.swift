@@ -215,7 +215,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// One aligned row per metric:  ◷ Session · 5h   79%  ▬▬▬▬▭▭  3h 11m · 05:00
     private func configure(_ item: NSMenuItem, metric m: Metric) {
         item.attributedTitle = MetricRow.title(m, layout: layout, now: store.now)
-        item.image = img(MetricRow.icon(m))
+        item.image = MenuIcons.striped(MetricRow.icon(m), color: nil)  // bar only on headers
         if #available(macOS 14.4, *) { item.subtitle = nil }
         item.toolTip = [m.label, m.text, Fmt.resetLine(m, now: store.now)].compactMap { $0 }.joined(separator: " — ")
     }
@@ -226,7 +226,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         item.target = action == nil ? nil : self
         item.representedObject = represented
         item.indentationLevel = 0
-        item.image = img(image)
+        item.image = MenuIcons.striped(image, color: nil)
         return item
     }
 
