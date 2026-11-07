@@ -118,11 +118,8 @@ enum MenuIcons {
 
     /// The item's icon with a coloured group bar along its left edge (a standard menu-item image).
     /// Every top-level item uses the same width, so titles stay aligned with or without a bar.
-    /// `up` / `down` let the bar overflow the image so it joins the neighbouring rows of the same group.
-    static func striped(_ icon: NSImage?, color: NSColor?, tall: Bool = false,
-                        up: Bool = false, down: Bool = false) -> NSImage {
+    static func striped(_ icon: NSImage?, color: NSColor?, tall: Bool = false) -> NSImage {
         let size = NSSize(width: 27, height: tall ? 30 : 20)
-        let overflow: CGFloat = 14
         return NSImage(size: size, flipped: false) { rect in
             if let icon {
                 let s = icon.size
@@ -137,9 +134,7 @@ enum MenuIcons {
             }
             if let color {
                 color.setFill()
-                let bottom = down ? -overflow : 0, top = rect.height + (up ? overflow : 0)
-                NSBezierPath(roundedRect: NSRect(x: 0, y: bottom, width: 4, height: top - bottom),
-                             xRadius: up && down ? 0 : 2, yRadius: up && down ? 0 : 2).fill()
+                NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 4, height: rect.height), xRadius: 2, yRadius: 2).fill()
             }
             return true
         }
