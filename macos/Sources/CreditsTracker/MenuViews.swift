@@ -114,62 +114,86 @@ enum MenuIcons {
     }
 }
 
-// MARK: - Metric row (attributed title with tab-aligned columns and an inline bar)
+// MARK: - Metric row (attributed title with content-sized, tab-aligned columns)
+
+/// Label · value (right-aligned) · bar · reset — column positions measured from all rows in the menu.
+struct MetricLayout: Equatable {
+    var valueRight: CGFloat
+    var barLeft: CGFloat
+    var resetLeft: CGFloat
+
+    static let barWidth: CGFloat = 70
+    static let gap: CGFloat = 12
+
+    static var font: NSFont { NSFont.menuFont(ofSize: 0) }
+    static var valueFont: NSFont { NSFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .semibold) }
+
+    static func measure(_ metrics: [Metric]) -> MetricLayout {
+        let labelW = metrics.map { ($0.label as NSString).size(withAttributes: [.font: font]).width }.max() ?? 80
+        let valueW = metrics.map { (MetricRow.value($0) as NSString).size(withAttributes: [.font: valueFont]).width }.max() ?? 40
+        let valueRight = ceil(labelW + gap + valueW)
+        let barLeft = valueRight + gap
+        return MetricLayout(valueRight: valueRight, barLeft: barLeft, resetLeft: barLeft + barWidth + gap)
+    }
+}
 
 enum MetricRow {
-    static let barColumn: CGFloat = 128
-    static let barWidth: CGFloat = 64
-    static let valueColumn: CGFloat = barColumn + barWidth + 12
-    static let resetColumn: CGFloat = 440   // right-aligned
+    static func value(_ m: Metric) -> String { m.idle ? "idle" : m.text }
 
-    static func title(_ m: Metric, now: Date) -> NSAttributedString {
-        let base = NSFont.menuFont(ofSize: 0)
-        let small = NSFont.systemFont(ofSize: base.pointSize - 1.5)
+    static func icon(_ m: Metric) -> NSImage? {
+        let name: String = switch m.key {
+        case "session": "clock"
+        case let k where k.hasPrefix("weekly"): "calendar"
+        case "budget", "extra_usage": "dollarsign.circle"
+        case "team": "person.2"
+        case "premium_interactions": "sparkles"
+        default: "chart.bar"
+        }
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+        img?.isTemplate = true
+        return img
+    }
+
+    static func title(_ m: Metric, layout: MetricLayout, now: Date) -> NSAttributedString {
+        let font = MetricLayout.font
         let para = NSMutableParagraphStyle()
-        para.tabStops = [NSTextTab(textAlignment: .left, location: barColumn),
-                         NSTextTab(textAlignment: .left, location: valueColumn),
-                         NSTextTab(textAlignment: .right, location: resetColumn)]
-        para.lineBreakMode = .byClipping
-
+        para.tabStops = [NSTextTab(textAlignment: .right, location: layout.valueRight),
+                         NSTextTab(textAlignment: .left, location: layout.barLeft),
+                         NSTextTab(textAlignment: .left, location: layout.resetLeft)]
         let pct = m.idle ? 0 : m.percent
-        let out = NSMutableAttributedString(string: m.label, attributes: [
-            .font: base, .foregroundColor: NSColor.labelColor, .paragraphStyle: para])
+        let out = NSMutableAttributedString(string: m.label, attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+        out.append(NSAttributedString(string: "\t" + value(m), attributes: [
+            .font: MetricLayout.valueFont,
+            .foregroundColor: m.idle ? NSColor.secondaryLabelColor : ((pct ?? 0) >= 85 ? NSColor.systemRed : NSColor.labelColor)]))
         out.append(NSAttributedString(string: "\t"))
-
         let bar = NSTextAttachment()
         bar.image = barImage(pct)
-        bar.bounds = CGRect(x: 0, y: (base.capHeight - 6) / 2, width: barWidth, height: 6)
+        bar.bounds = CGRect(x: 0, y: (font.capHeight - 7) / 2, width: MetricLayout.barWidth, height: 7)
         out.append(NSAttributedString(attachment: bar))
-        out.append(NSAttributedString(string: "\t"))
-
-        out.append(NSAttributedString(string: m.idle ? "idle" : m.text, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: base.pointSize, weight: .semibold),
-            .foregroundColor: m.idle || pct == nil ? NSColor.secondaryLabelColor : Fmt.usageColor(pct)]))
-
         out.append(NSAttributedString(string: "\t" + (shortReset(m, now: now) ?? ""), attributes: [
-            .font: small, .foregroundColor: NSColor.secondaryLabelColor]))
+            .font: NSFont.systemFont(ofSize: font.pointSize - 1), .foregroundColor: NSColor.secondaryLabelColor]))
         out.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: out.length))
         return out
     }
 
-    /// "in 3h 12m · 05:00", "in 2d 1h · Mon 03:00", "Dec 1", "ping to start"
+    /// "3h 11m · 05:00", "2d 1h · Mon 03:00", "Dec 1", "ping to start"
     static func shortReset(_ m: Metric, now: Date) -> String? {
         if m.idle { return "ping to start" }
         guard let date = m.resetDate else { return nil }
-        let secs = date.timeIntervalSince(now)
-        if secs > 6 * 86400 { return Fmt.clock(date, now: now) }
-        return "in \(Fmt.countdown(to: date, now: now)) · \(Fmt.clock(date, now: now))"
+        if date.timeIntervalSince(now) > 6 * 86400 { return "resets \(Fmt.clock(date, now: now))" }
+        return "\(Fmt.countdown(to: date, now: now)) · \(Fmt.clock(date, now: now))"
     }
 
     static func barImage(_ pct: Double?) -> NSImage {
-        NSImage(size: NSSize(width: barWidth, height: 6), flipped: false) { rect in
-            NSColor.tertiaryLabelColor.withAlphaComponent(0.3).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+        NSImage(size: NSSize(width: MetricLayout.barWidth, height: 7), flipped: false) { rect in
+            NSColor.labelColor.withAlphaComponent(0.15).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 3.5, yRadius: 3.5).fill()
             if let p = pct, p > 0 {
                 var fill = rect
-                fill.size.width = max(6, rect.width * min(p, 100) / 100)
+                fill.size.width = max(7, rect.width * min(p, 100) / 100)
                 Fmt.usageColor(p).setFill()
-                NSBezierPath(roundedRect: fill, xRadius: 3, yRadius: 3).fill()
+                NSBezierPath(roundedRect: fill, xRadius: 3.5, yRadius: 3.5).fill()
             }
             return true
         }

@@ -11,6 +11,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private var cancellables: Set<AnyCancellable> = []
     private var structure = ""
     private var metricItems: [String: NSMenuItem] = [:]
+    private var layout = MetricLayout(valueRight: 0, barLeft: 0, resetLeft: 0)
     private var updateQueued = false
 
     private var showPercent: Bool {
@@ -49,8 +50,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func update() {
         updateButton()
+        let newLayout = MetricLayout.measure(store.activeAccounts.flatMap(\.metrics))
         let signature = structureSignature()
-        if signature != structure {
+        if signature != structure || newLayout != layout {
+            layout = newLayout
             structure = signature
             rebuild()
         } else {
@@ -175,7 +178,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             menu.addItem(item)
         }
         for note in acc.notes {
-            menu.addItem(info(note, image: MenuIcons.symbol("info.circle", .secondaryLabelColor)))
+            let n = info(note, image: NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil))
+            n.indentationLevel = 0
+            menu.addItem(n)
         }
         if acc.status == "error" || acc.status == "stale", let err = acc.error {
             let stale = acc.status == "stale"
@@ -193,10 +198,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// One aligned row per metric:  Label   ▬▬▬▬▬▭▭▭   78%        in 3h 12m · 05:00
+    /// One aligned row per metric:  ◷ Session · 5h   79%  ▬▬▬▬▭▭  3h 11m · 05:00
     private func configure(_ item: NSMenuItem, metric m: Metric) {
-        item.attributedTitle = MetricRow.title(m, now: store.now)
-        item.image = nil
+        item.attributedTitle = MetricRow.title(m, layout: layout, now: store.now)
+        item.image = MetricRow.icon(m)
         if #available(macOS 14.4, *) { item.subtitle = nil }
         item.toolTip = [m.label, m.text, Fmt.resetLine(m, now: store.now)].compactMap { $0 }.joined(separator: " — ")
     }
@@ -206,7 +211,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = action == nil ? nil : self
         item.representedObject = represented
-        item.indentationLevel = 1
+        item.indentationLevel = 0
         item.image = image
         return item
     }
