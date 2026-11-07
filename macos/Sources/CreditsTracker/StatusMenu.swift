@@ -116,6 +116,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             if currentGroup != .some(acc.group) {
                 currentGroup = .some(acc.group)
                 menu.addItem(.separator())
+                if grouped && menu.numberOfItems > 2 { menu.addItem(.separator()) }  // double line between groups
                 if grouped { menu.addItem(groupHeader(acc.group ?? "Other")) }
             } else {
                 menu.addItem(.separator())  // between subscriptions of the same group
