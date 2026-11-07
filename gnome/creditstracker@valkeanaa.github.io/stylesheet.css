@@ -23,6 +23,9 @@
 .ct-badge-bedrock { background-color: #f29a1a; }
 .ct-badge-command, .ct-badge-unknown { background-color: #6e7781; }
 .ct-title { font-weight: bold; }
+.ct-title-btn { border-radius: 6px; padding: 0; }
+.ct-title-btn:hover, .ct-title-btn:focus { background-color: rgba(127, 127, 127, 0.18); }
+.ct-pin { icon-size: 12px; margin-left: 6px; color: #9a9a9a; }
 .ct-plan {
   font-size: 7.5pt; font-weight: bold; color: #999;
   padding: 1px 5px; margin-left: 6px; border-radius: 99px;

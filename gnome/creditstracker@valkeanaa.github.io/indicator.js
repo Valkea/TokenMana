@@ -757,7 +757,20 @@ const Indicator = GObject.registerClass({
         titles.add_child(titleRow);
         if (acc.identity)
             titles.add_child(label(acc.identity, 'ct-dim'));
-        head.add_child(titles);
+        if (acc.metrics.some(m => typeof m.percent === 'number')) {
+            // Clicking the name puts this account's usage next to the top-bar icon; again, back to Auto.
+            const pinned = this._settings.get_string('panel-account') === acc.id;
+            if (pinned)
+                titleRow.add_child(new St.Icon({icon_name: 'view-pin-symbolic', style_class: 'ct-pin'}));
+            const btn = new St.Button({
+                style_class: 'ct-title-btn', child: titles, x_expand: true, can_focus: true,
+                accessible_name: pinned ? 'Shown in the top bar: click for Auto' : 'Show in the top bar',
+            });
+            btn.connect('clicked', () => this._settings.set_string('panel-account', pinned ? '' : acc.id));
+            head.add_child(btn);
+        } else {
+            head.add_child(titles);
+        }
         if (acc.status === 'stale')
             head.add_child(new St.Icon({icon_name: 'dialog-warning-symbolic', style: 'color: #ffb340; icon-size: 14px;'}));
         if (acc.can_ping) {
