@@ -116,7 +116,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             if currentGroup != .some(acc.group) {
                 currentGroup = .some(acc.group)
                 menu.addItem(.separator())
-                if grouped { menu.addItem(.sectionHeader(title: acc.group ?? "Other")) }
+                if grouped { menu.addItem(groupHeader(acc.group ?? "Other")) }
+            } else {
+                menu.addItem(.separator())  // between subscriptions of the same group
             }
             if acc.isSetup {
                 let item = NSMenuItem(title: acc.label, action: nil, keyEquivalent: "")
@@ -247,6 +249,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         sub.addItem(edit)
         sub.addItem(action("Remove Account…", #selector(removeAccount(_:)), represented: acc.id))
         return sub
+    }
+
+    /// Native section header, styled to stand out: "WORK".
+    private func groupHeader(_ name: String) -> NSMenuItem {
+        let item = NSMenuItem.sectionHeader(title: name)
+        item.attributedTitle = NSAttributedString(string: name.uppercased(), attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize - 1, weight: .bold),
+            .foregroundColor: NSColor.labelColor,
+            .kern: 1.2])
+        return item
     }
 
     private func groupMenuItem(_ acc: Account) -> NSMenuItem {
