@@ -20,6 +20,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "showPercent") }
     }
 
+    /// Id of the account shown in the menu bar; empty = the one with the highest usage.
+    private var panelAccount: String {
+        get { UserDefaults.standard.string(forKey: "panelAccount") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "panelAccount") }
+    }
+
     init(store: Store) {
         self.store = store
         super.init()
@@ -71,18 +77,42 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func updateButton() {
         guard let button = statusItem.button else { return }
-        let pct = store.status?.summary?.percent
+        let (pct, text, tip) = menuBarUsage()
         let image = NSImage(systemSymbolName: Fmt.gaugeSymbol(pct), accessibilityDescription: "Coding assistants usage")?
             .withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
         image?.isTemplate = true
         button.image = image
-        button.title = showPercent && pct != nil ? " \(Int(pct!.rounded()))%" : ""
-        button.toolTip = store.status?.summary?.label
+        button.title = showPercent && !text.isEmpty ? " \(text)" : ""
+        button.toolTip = tip
+    }
+
+    /// The chosen account (or, on Auto, the one with the highest usage): "5h% · week%".
+    /// Returns the gauge percentage, the menu-bar text and the tooltip.
+    private func menuBarUsage() -> (Double?, String, String?) {
+        let summary = store.status?.summary
+        let accounts = store.status?.accounts ?? []
+        let chosen = panelAccount.isEmpty ? summary?.account : panelAccount
+        guard let acc = accounts.first(where: { $0.id == chosen }) ?? accounts.first(where: { $0.id == summary?.account }) else {
+            return (summary?.percent, summary.map { "\(Int($0.percent.rounded()))%" } ?? "", summary?.label)
+        }
+        func pct(_ m: Metric?) -> Double? { m.flatMap { $0.idle ? 0 : $0.percent } }
+        let session = acc.metrics.first { $0.key == "session" }
+        let weekly = acc.metrics.first { $0.key == "weekly_all" || $0.key == "weekly" }
+        var shown = [pct(session), pct(weekly)].compactMap { $0 }
+        var labels = [session, weekly].compactMap { m in m.flatMap { pct($0) != nil ? $0.label : nil } }
+        if shown.isEmpty, let worst = acc.metrics.filter({ $0.percent != nil }).max(by: { $0.percent! < $1.percent! }) {
+            // Accounts without 5h/weekly windows (Copilot, command accounts): their highest metric.
+            shown = [worst.percent!]
+            labels = [worst.label]
+        }
+        guard !shown.isEmpty else { return (nil, "", acc.label) }
+        let text = shown.map { "\(Int($0.rounded()))%" }.joined(separator: " · ")
+        return (shown.max(), text, "\(acc.label) — \(labels.joined(separator: " · "))")
     }
 
     /// Everything that changes the list of items (not just the numbers in them).
     private func structureSignature() -> String {
-        var parts = [store.groups.joined(separator: ","), "\(store.status?.groupColors ?? [:])", store.loadError ?? "", "\(store.refreshing)", "\(showPercent)", "\(store.launchAtLogin)",
+        var parts = [store.groups.joined(separator: ","), "\(store.status?.groupColors ?? [:])", store.loadError ?? "", "\(store.refreshing)", "\(showPercent)", panelAccount, "\(store.launchAtLogin)",
                      "\(store.status == nil)"]
         for a in store.status?.accounts ?? [] {
             parts.append([a.id, a.label, a.group ?? "", a.status, a.plan ?? "", a.identity ?? "", a.error ?? "", a.hint ?? "",
@@ -341,6 +371,26 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return item
     }
 
+    /// Which account's 5h/weekly usage the menu bar shows.
+    private func menuBarAccountItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Menu Bar Account", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let accounts = (store.status?.accounts ?? []).filter { $0.metrics.contains { $0.percent != nil } }
+        let current = accounts.contains { $0.id == panelAccount } ? panelAccount : ""
+        let auto = action("Auto (Highest Usage)", #selector(choosePanelAccount(_:)), represented: "")
+        auto.state = current.isEmpty ? .on : .off
+        sub.addItem(auto)
+        if !accounts.isEmpty { sub.addItem(.separator()) }
+        for acc in accounts {
+            let a = action(acc.label, #selector(choosePanelAccount(_:)), represented: acc.id)
+            a.state = acc.id == current ? .on : .off
+            sub.addItem(a)
+        }
+        item.submenu = sub
+        return item
+    }
+
     private func settingsItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         item.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
@@ -349,6 +399,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let pct = action("Show Percentage in Menu Bar", #selector(togglePercent))
         pct.state = showPercent ? .on : .off
         sub.addItem(pct)
+        sub.addItem(menuBarAccountItem())
         let login = action("Launch at Login", #selector(toggleLaunchAtLogin))
         login.state = store.launchAtLogin ? .on : .off
         sub.addItem(login)
@@ -551,6 +602,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func togglePercent() {
         showPercent.toggle()
+        update()
+    }
+
+    @objc private func choosePanelAccount(_ sender: NSMenuItem) {
+        panelAccount = sender.representedObject as? String ?? ""
         update()
     }
 
