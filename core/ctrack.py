@@ -132,7 +132,7 @@ def fmt_money(v, currency="USD"):
     sym = {"USD": "$", "EUR": "€", "GBP": "£"}.get((currency or "USD").upper(), "")
     if v is None:
         return "—"
-    s = f"{v:,.0f}" if float(v).is_integer() and abs(v) >= 100 else f"{v:,.2f}"
+    s = f"{v:,.0f}" if abs(v) >= 100 else f"{v:,.2f}"
     return f"{sym}{s}" if sym else f"{s} {currency}"
 
 
@@ -298,7 +298,7 @@ def open_url(url):
 
 CLAUDE_LIMIT_LABELS = {
     "session": "Session · 5h",
-    "weekly_all": "Weekly · all models",
+    "weekly_all": "Weekly",
     "weekly_opus": "Weekly · Opus",
     "weekly_sonnet": "Weekly · Sonnet",
 }
@@ -392,7 +392,7 @@ def fetch_claude(acc):
                                   resets_at=lim.get("resets_at"), window=window, idle=idle))
     else:
         for key, mkey, label, window in (("five_hour", "session", "Session · 5h", SESSION_WINDOW),
-                                         ("seven_day", "weekly_all", "Weekly · all models", WEEK_WINDOW),
+                                         ("seven_day", "weekly_all", "Weekly", WEEK_WINDOW),
                                          ("seven_day_opus", "weekly_opus", "Weekly · Opus", WEEK_WINDOW),
                                          ("seven_day_sonnet", "weekly_sonnet", "Weekly · Sonnet", WEEK_WINDOW)):
             w = d.get(key)
@@ -412,7 +412,7 @@ def fetch_claude(acc):
         lim, cur2 = money(spend.get("limit") or spend.get("cap"))
         cur = cur or cur2 or "USD"
         text = f"{fmt_money(used, cur)} / {fmt_money(lim, cur)}" if lim else fmt_money(used, cur)
-        metrics.append(metric("extra_usage", "Extra usage · month", spend.get("percent"), text=text,
+        metrics.append(metric("extra_usage", "Extra usage", spend.get("percent"), text=text,
                               resets_at=first_of_next_month()))
     plan = (tok.get("subscriptionType") or "").title() or None
     return {"plan": plan, "identity": claude_identity(acc), "metrics": metrics, "notes": notes}
@@ -631,8 +631,8 @@ def fetch_copilot(acc):
     reset = d.get("quota_reset_date_utc") or d.get("quota_reset_date") or d.get("limited_user_reset_date")
     metrics, notes = [], []
     snaps = d.get("quota_snapshots") or {}
-    for key, label in (("premium_interactions", "Premium requests · month"), ("chat", "Chat · month"),
-                       ("completions", "Completions · month")):
+    for key, label in (("premium_interactions", "Premium requests"), ("chat", "Chat"),
+                       ("completions", "Completions")):
         s = snaps.get(key)
         if not isinstance(s, dict):
             continue
@@ -644,11 +644,13 @@ def fetch_copilot(acc):
         rem = s.get("remaining", s.get("quota_remaining"))
         pct_left = s.get("percent_remaining")
         used = (ent - rem) if ent is not None and rem is not None else None
+        if key != "premium_interactions" and "premium_interactions" in snaps and not used:
+            continue
         pct = 100 - pct_left if pct_left is not None else (used / ent * 100 if used is not None and ent else None)
         text = f"{fmt_num(used)} / {fmt_num(ent)}" if used is not None and ent else None
         metrics.append(metric(key, label, pct, text=text, resets_at=reset))
         if s.get("overage_count"):
-            notes.append(f"{label.split(' ·')[0]}: {fmt_num(s['overage_count'])} over quota"
+            notes.append(f"{label}: {fmt_num(s['overage_count'])} over quota"
                          + (" (billed)" if s.get("overage_permitted") else ""))
     if not snaps and d.get("monthly_quotas"):  # legacy free-plan shape
         for key in ("chat", "completions"):
@@ -656,7 +658,7 @@ def fetch_copilot(acc):
             rem = (d.get("limited_user_quotas") or {}).get(key)
             if ent:
                 used = ent - (rem or 0)
-                metrics.append(metric(key, f"{key.title()} · month", used / ent * 100,
+                metrics.append(metric(key, key.title(), used / ent * 100,
                                       text=f"{fmt_num(used)} / {fmt_num(ent)}", resets_at=reset))
     plan = d.get("copilot_plan") or d.get("access_type_sku")
     return {"plan": (plan or "").replace("_", " ").title() or None, "identity": d.get("login"),

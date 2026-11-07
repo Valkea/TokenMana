@@ -113,3 +113,65 @@ enum MenuIcons {
             .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color]))
     }
 }
+
+// MARK: - Metric row (attributed title with tab-aligned columns and an inline bar)
+
+enum MetricRow {
+    static let barColumn: CGFloat = 128
+    static let barWidth: CGFloat = 64
+    static let valueColumn: CGFloat = barColumn + barWidth + 12
+    static let resetColumn: CGFloat = 440   // right-aligned
+
+    static func title(_ m: Metric, now: Date) -> NSAttributedString {
+        let base = NSFont.menuFont(ofSize: 0)
+        let small = NSFont.systemFont(ofSize: base.pointSize - 1.5)
+        let para = NSMutableParagraphStyle()
+        para.tabStops = [NSTextTab(textAlignment: .left, location: barColumn),
+                         NSTextTab(textAlignment: .left, location: valueColumn),
+                         NSTextTab(textAlignment: .right, location: resetColumn)]
+        para.lineBreakMode = .byClipping
+
+        let pct = m.idle ? 0 : m.percent
+        let out = NSMutableAttributedString(string: m.label, attributes: [
+            .font: base, .foregroundColor: NSColor.labelColor, .paragraphStyle: para])
+        out.append(NSAttributedString(string: "\t"))
+
+        let bar = NSTextAttachment()
+        bar.image = barImage(pct)
+        bar.bounds = CGRect(x: 0, y: (base.capHeight - 6) / 2, width: barWidth, height: 6)
+        out.append(NSAttributedString(attachment: bar))
+        out.append(NSAttributedString(string: "\t"))
+
+        out.append(NSAttributedString(string: m.idle ? "idle" : m.text, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: base.pointSize, weight: .semibold),
+            .foregroundColor: m.idle || pct == nil ? NSColor.secondaryLabelColor : Fmt.usageColor(pct)]))
+
+        out.append(NSAttributedString(string: "\t" + (shortReset(m, now: now) ?? ""), attributes: [
+            .font: small, .foregroundColor: NSColor.secondaryLabelColor]))
+        out.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: out.length))
+        return out
+    }
+
+    /// "in 3h 12m · 05:00", "in 2d 1h · Mon 03:00", "Dec 1", "ping to start"
+    static func shortReset(_ m: Metric, now: Date) -> String? {
+        if m.idle { return "ping to start" }
+        guard let date = m.resetDate else { return nil }
+        let secs = date.timeIntervalSince(now)
+        if secs > 6 * 86400 { return Fmt.clock(date, now: now) }
+        return "in \(Fmt.countdown(to: date, now: now)) · \(Fmt.clock(date, now: now))"
+    }
+
+    static func barImage(_ pct: Double?) -> NSImage {
+        NSImage(size: NSSize(width: barWidth, height: 6), flipped: false) { rect in
+            NSColor.tertiaryLabelColor.withAlphaComponent(0.3).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+            if let p = pct, p > 0 {
+                var fill = rect
+                fill.size.width = max(6, rect.width * min(p, 100) / 100)
+                Fmt.usageColor(p).setFill()
+                NSBezierPath(roundedRect: fill, xRadius: 3, yRadius: 3).fill()
+            }
+            return true
+        }
+    }
+}

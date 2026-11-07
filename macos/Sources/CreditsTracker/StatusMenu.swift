@@ -157,6 +157,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func addAccountSection(_ acc: Account) {
         let head = NSMenuItem(title: acc.label, action: nil, keyEquivalent: "")
+        head.attributedTitle = NSAttributedString(string: acc.label, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)])
         head.image = VendorImage.badge(acc.vendor)
         if #available(macOS 14.4, *) {
             head.subtitle = [acc.plan, acc.identity].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -167,6 +169,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         for m in acc.metrics {
             let item = info("", action: acc.dashboardUrl != nil ? #selector(openURL(_:)) : nil,
                             represented: acc.dashboardUrl)
+            item.indentationLevel = 0
             configure(item, metric: m)
             metricItems["\(acc.id)/\(m.key)"] = item
             menu.addItem(item)
@@ -190,10 +193,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// One aligned row per metric:  Label   ▬▬▬▬▬▭▭▭   78%        in 3h 12m · 05:00
     private func configure(_ item: NSMenuItem, metric m: Metric) {
-        item.title = "\(m.label) — \(m.text)"
-        item.image = MenuIcons.ring(m.idle ? 0 : m.percent)
-        if #available(macOS 14.4, *) { item.subtitle = Fmt.resetLine(m, now: store.now) }
+        item.attributedTitle = MetricRow.title(m, now: store.now)
+        item.image = nil
+        if #available(macOS 14.4, *) { item.subtitle = nil }
+        item.toolTip = [m.label, m.text, Fmt.resetLine(m, now: store.now)].compactMap { $0 }.joined(separator: " — ")
     }
 
     /// A plain, indented informational row under an account header.
