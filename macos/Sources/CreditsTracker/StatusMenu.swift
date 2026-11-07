@@ -263,6 +263,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private func accountMenu(_ acc: Account) -> NSMenu {
         let sub = NSMenu()
         sub.autoenablesItems = false
+        if acc.metrics.contains(where: { $0.percent != nil }) {
+            // Checked = this account's usage is the one next to the menu-bar icon; unchecking returns to Auto.
+            let shown = panelAccount == acc.id
+            let pin = action("Show in Menu Bar", #selector(choosePanelAccount(_:)),
+                             represented: shown ? "" : acc.id, symbol: "menubar.rectangle")
+            pin.state = shown ? .on : .off
+            if #available(macOS 14.4, *) { pin.subtitle = shown ? "Uncheck to go back to Auto (highest usage)" : nil }
+            sub.addItem(pin)
+            sub.addItem(.separator())
+        }
         if acc.canPing {
             let ping = action("Ping Now", #selector(pingAccount(_:)), represented: acc.id, symbol: "bolt.fill")
             if #available(macOS 14.4, *) { ping.subtitle = "Smallest model, low effort — starts the 5h timer" }
