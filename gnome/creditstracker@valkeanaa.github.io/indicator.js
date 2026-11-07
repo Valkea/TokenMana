@@ -9,6 +9,7 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
 
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
@@ -93,6 +94,48 @@ function openUri(uri) {
 
 function copyText(text) {
     St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
+}
+
+// How each terminal takes a command to run; others get the Debian `-e cmd args...` convention.
+const TERMINAL_ARGS = {
+    'ptyxis': ['--'], 'kgx': ['--'], 'gnome-terminal': ['--'], 'gnome-console': ['--'],
+    'kitty': [], 'alacritty': ['-e'], 'wezterm': ['start', '--'], 'foot': [],
+    'konsole': ['-e'], 'xfce4-terminal': ['-x'], 'tilix': ['-e'], 'terminator': ['-x'],
+};
+
+// The GNOME default terminal if we know its syntax, then known terminals, then the generic ones.
+function findTerminal() {
+    let preferred = null;
+    try {
+        preferred = new Gio.Settings({schema_id: 'org.gnome.desktop.default-applications.terminal'}).get_string('exec');
+    } catch (_e) {}
+    const known = Object.keys(TERMINAL_ARGS);
+    const names = [known.includes(preferred) ? preferred : null, ...known, 'x-terminal-emulator', 'xterm'];
+    for (const name of names) {
+        const path = name && GLib.find_program_in_path(name);
+        if (path)
+            return [path, TERMINAL_ARGS[name] ?? ['-e']];
+    }
+    return null;
+}
+
+// Opens a terminal running `command` (a shell line, e.g. "CLAUDE_CONFIG_DIR=... claude") in an
+// interactive shell, so the user's PATH applies, then leaves the shell open. Returns false on failure.
+function runInTerminal(command) {
+    const found = findTerminal();
+    if (!found)
+        return false;
+    const [term, prefix] = found;
+    const shell = GLib.getenv('SHELL') || '/bin/sh';
+    try {
+        const launcher = new Gio.SubprocessLauncher({flags: Gio.SubprocessFlags.NONE});
+        launcher.set_cwd(GLib.get_home_dir());
+        launcher.spawnv([term, ...prefix, shell, '-i', '-c', `${command}; exec "${shell}" -i`]);
+        return true;
+    } catch (e) {
+        logError(e, 'CreditsTracker: cannot open a terminal');
+        return false;
+    }
 }
 
 // ─── core runner ────────────────────────────────────────────────────────────
@@ -724,7 +767,13 @@ const Indicator = GObject.registerClass({
                 () => this._ping([acc.id]), idle ? 'ct-ping-idle' : ''));
         }
         if (acc.cli)
-            head.add_child(iconButton('utilities-terminal-symbolic', `Copy: ${acc.cli}`, () => copyText(acc.cli)));
+            head.add_child(iconButton('utilities-terminal-symbolic', `Open a terminal: ${acc.cli}`, () => {
+                this.menu.close();
+                if (!runInTerminal(acc.cli)) {
+                    copyText(acc.cli);
+                    Main.notify('CreditsTracker', `No terminal found. Copied to clipboard: ${acc.cli}`);
+                }
+            }));
         if (acc.dashboard_url)
             head.add_child(iconButton('web-browser-symbolic', 'Open usage page', () => openUri(acc.dashboard_url)));
         head.add_child(iconButton('document-edit-symbolic', 'Rename, group, host', () => this._startEdit(acc)));
