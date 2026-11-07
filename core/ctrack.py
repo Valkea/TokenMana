@@ -947,6 +947,25 @@ def cmd_edit(args):
     return 0
 
 
+def cmd_rename_group(args):
+    cfg = load_config()
+    old, new = args.old.strip().casefold(), args.new.strip()
+    n = 0
+    for a in cfg["accounts"]:
+        if (a.get("group") or "").casefold() == old:
+            if new:
+                a["group"] = new
+            else:
+                a.pop("group", None)
+            n += 1
+    cfg["groups"] = [new if g.casefold() == old else g for g in cfg.get("groups") or [] if new or g.casefold() != old]
+    if not cfg["groups"]:
+        cfg.pop("groups")
+    write_json(CONFIG_PATH, cfg)
+    print(json.dumps({"renamed": n}) if args.json else f"renamed group on {n} account(s)")
+    return 0
+
+
 def cmd_remove(args):
     cfg = load_config()
     find_account(cfg, args.account)
@@ -1230,6 +1249,10 @@ def main(argv=None):
     ed.add_argument("--group", help='group name, "" to remove from its group')
     ed.add_argument("--host", help="Copilot: github.com or e.g. mycorp.ghe.com (clears the stored token)")
     ed.add_argument("--json", action="store_true")
+    rg = sub.add_parser("rename-group", help='rename a group ("" to ungroup its accounts)')
+    rg.add_argument("old")
+    rg.add_argument("new")
+    rg.add_argument("--json", action="store_true")
     rm = sub.add_parser("remove", help="remove an account from the config (and its stored token)")
     rm.add_argument("account")
     rm.add_argument("--json", action="store_true")
@@ -1237,7 +1260,7 @@ def main(argv=None):
     i.add_argument("--force", action="store_true")
     sub.add_parser("paths")
     args = ap.parse_args(argv)
-    handlers = {"status": cmd_status, "ping": cmd_ping, "login": cmd_login, "add": cmd_add, "edit": cmd_edit, "remove": cmd_remove,
+    handlers = {"status": cmd_status, "ping": cmd_ping, "login": cmd_login, "add": cmd_add, "edit": cmd_edit, "rename-group": cmd_rename_group, "remove": cmd_remove,
                 "init": cmd_init, "paths": cmd_paths}
     if not args.cmd:
         args = ap.parse_args(["status"] + (argv or sys.argv[1:]))

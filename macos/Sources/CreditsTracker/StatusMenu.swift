@@ -116,8 +116,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             if currentGroup != .some(acc.group) {
                 currentGroup = .some(acc.group)
                 menu.addItem(.separator())
-                if grouped && menu.numberOfItems > 2 { menu.addItem(.separator()) }  // double line between groups
-                if grouped { menu.addItem(groupHeader(acc.group ?? "Other")) }
+                if grouped {
+                    if menu.numberOfItems > 2 { menu.addItem(spacer()) }
+                    menu.addItem(groupHeader(acc.group, accounts: accounts.filter { $0.group == acc.group }))
+                }
             } else {
                 menu.addItem(.separator())  // between subscriptions of the same group
             }
@@ -252,13 +254,42 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return sub
     }
 
-    /// Native section header, styled to stand out: "WORK".
-    private func groupHeader(_ name: String) -> NSMenuItem {
-        let item = NSMenuItem.sectionHeader(title: name)
-        item.attributedTitle = NSAttributedString(string: name.uppercased(), attributes: [
-            .font: NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize - 1, weight: .bold),
-            .foregroundColor: NSColor.labelColor,
-            .kern: 1.2])
+    /// Blank standard item with a tiny font: a small vertical gap (separators can't be doubled).
+    private func spacer() -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.attributedTitle = NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 3)])
+        item.isEnabled = false
+        return item
+    }
+
+    /// Group header: a real (full-colour) item whose submenu holds group-wide actions.
+    private func groupHeader(_ name: String?, accounts: [Account]) -> NSMenuItem {
+        let title = name ?? "Other"
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.attributedTitle = NSAttributedString(string: title.uppercased(), attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .heavy),
+            .foregroundColor: NSColor.labelColor, .kern: 1.5])
+        let lower = title.lowercased()
+        let symbol = ["work", "pro", "client", "company", "job", "office", "boulot"].contains { lower.contains($0) } ? "briefcase.fill"
+            : ["perso", "home", "private", "privé", "me"].contains { lower.contains($0) } ? "person.fill"
+            : name == nil ? "tray.fill" : "folder.fill"
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
+
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let idle = accounts.filter { !$0.isSetup && $0.canPing && $0.hasIdleSession }.map(\.id)
+        let ping = action(idle.isEmpty ? "No Idle Sessions" : "Ping \(idle.count) Idle Session\(idle.count > 1 ? "s" : "")",
+                          #selector(pingIDs(_:)), represented: idle, symbol: "bolt.fill")
+        ping.isEnabled = !idle.isEmpty
+        sub.addItem(ping)
+        sub.addItem(action("Refresh Group", #selector(refreshIDs(_:)), represented: accounts.map(\.id),
+                           symbol: "arrow.clockwise"))
+        if let name {
+            sub.addItem(.separator())
+            sub.addItem(action("Rename Group…", #selector(renameGroup(_:)), represented: name, symbol: "pencil"))
+        }
+        item.submenu = sub
         return item
     }
 
@@ -413,6 +444,35 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                     AccountWindowController.shared.show()
                 }
             }
+        }
+    }
+
+    @objc private func pingIDs(_ sender: NSMenuItem) {
+        if let ids = sender.representedObject as? [String] { store.ping(ids) }
+    }
+
+    @objc private func refreshIDs(_ sender: NSMenuItem) {
+        guard let ids = sender.representedObject as? [String] else { return }
+        Task { for id in ids { _ = try? await Core.run(["status", "--json", "--compact", "--force", id]) }
+               await store.load(["--cached"]) }
+    }
+
+    @objc private func renameGroup(_ sender: NSMenuItem) {
+        guard let old = sender.representedObject as? String else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Rename Group “\(old)”"
+        alert.informativeText = "Leave empty to ungroup its accounts."
+        let field = NSTextField(string: old)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            _ = try? await Core.run(["rename-group", old, field.stringValue.trimmingCharacters(in: .whitespaces), "--json"])
+            await store.load(["--cached"])
         }
     }
 
