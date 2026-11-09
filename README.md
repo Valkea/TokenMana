@@ -94,6 +94,29 @@ Override per account:
 Set `"ping": false` to hide the button. Copilot and command accounts have no session timer, so they
 have no ping.
 
+### Auto ping
+
+Each Claude/Codex account can ping on its own (account submenu → *Auto Ping ▸* on macOS, ✎ on GNOME, or the CLI):
+
+```sh
+ctrack edit claude-perso --auto-ping 5h                    # 5 h 1 min after each ping
+ctrack edit claude-work  --auto-ping "08:00,13:01,18:02"   # at these times (24 h, this computer's clock)
+ctrack edit claude-work  --auto-ping off
+```
+
+- **Every 5h**: pings again 5 h 1 min after the last ping (manual or automatic), so a new session starts as soon as
+  the previous one has ended. If a session is already running (you used the account), it waits until that session's
+  reset + 1 min. If the computer was asleep, it pings as soon as it wakes. A failed ping is retried every 15 min.
+- **At set times**: pings at each time. If the computer was asleep or off at one of them (more than 5 min late), it
+  does **not** ping on wake: it asks (notification + the account's card, ⏰ next to the menu-bar/top-bar icon) whether
+  to *Ping now* or *Wait for* the next time. Several missed times make one question. If a session is already running,
+  there is nothing to start, so it does not ask. A failed ping asks the same question, with the error.
+
+The apps run `ctrack auto-ping` every minute while they are running. Without them (a server, say), use cron:
+`* * * * * ~/.local/bin/ctrack auto-ping`. Missed-time questions are then in `ctrack status`; answer with
+`ctrack ping <id>` or `ctrack auto-ping --dismiss <id>`. The config is shared between machines, so every machine
+that runs the app auto-pings that account (a second ping in a running session only costs a few tokens).
+
 ## Config reference
 
 `~/.config/creditstracker/config.json` is the same file on both machines (sync it with chezmoi, for example):
@@ -117,11 +140,12 @@ have no ping.
 | `platforms` | `["macos"]` / `["linux"]`: only show the account on that OS |
 | `enabled` | `false` hides the account |
 | `refresh_minutes` | per account or global; the UIs poll every minute and the core only fetches what is due |
+| `auto_ping` | `{"mode": "interval"}` (every 5 h 1 min) or `{"mode": "times", "times": ["08:00", "13:01"]}`; see [Auto ping](#auto-ping) |
 | `config_dir` / `codex_home` | Claude / Codex config dir of the account |
 | `dashboard_url` | override (or `null` to hide) the "open usage page" button |
 
 Files: secrets (Copilot tokens) live in `~/.config/creditstracker/secrets.json` (0600), the cache in
-`~/.cache/creditstracker/state.json`. Claude/Codex tokens are read where those CLIs keep them (the
+`~/.cache/creditstracker/state.json`, auto-ping state (last ping, pending questions) in `~/.cache/creditstracker/autoping.json`. Claude/Codex tokens are read where those CLIs keep them (the
 macOS Keychain or `~/.claude/.credentials.json`, and `auth.json`), only to call the usage endpoints.
 They are never written to the cache or printed.
 

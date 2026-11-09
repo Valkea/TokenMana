@@ -37,6 +37,7 @@ final class Store: ObservableObject {
     @Published var addForm: AddForm?
 
     private var loading = false
+    private var autoPinging = false
     private var loginSession: LoginSession?
     private var timers: [Timer] = []
 
@@ -44,12 +45,16 @@ final class Store: ObservableObject {
         Task {
             await load(["--cached"])   // instant paint from cache
             await load([])             // then fetch whatever is due
+            await autoPing()
         }
         // The core only hits the network when an account's cache is older than its
         // refresh interval, so polling every minute is cheap.
         // Timers run in .common modes so they also fire while the menu is open.
         let poll = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.load([], poll: true) }
+            Task { @MainActor in
+                await self?.load([], poll: true)
+                await self?.autoPing()
+            }
         }
         let tick = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.now = Date() }
@@ -61,6 +66,10 @@ final class Store: ObservableObject {
     var activeAccounts: [Account] { status?.accounts.filter { !$0.isSetup } ?? [] }
     var setupAccounts: [Account] { status?.accounts.filter { $0.isSetup } ?? [] }
     var anyIdle: Bool { activeAccounts.contains { $0.canPing && $0.hasIdleSession } }
+    /// "id@slot" of each missed scheduled ping waiting for an answer.
+    var missedPings: Set<String> {
+        Set((status?.accounts ?? []).compactMap { a in a.autoPing?.missed.map { "\(a.id)@\($0)" } })
+    }
 
     /// `ctrack status` → `status`. `poll` loads are skipped while another load is in flight.
     func load(_ extra: [String], poll: Bool = false) async {
@@ -72,10 +81,32 @@ final class Store: ObservableObject {
             status = try StatusResult.decode(data)
             loadError = nil
             lastLoaded = Date()
+            MissedPingNotifier.shared.sync(status?.accounts ?? [])
         } catch {
             loadError = error.localizedDescription
         }
         now = Date()
+    }
+
+    /// Scheduled pings: the core decides what is due (every 5h, or at set times) and pings it.
+    func autoPing() async {
+        guard !autoPinging, status?.accounts.contains(where: { $0.autoPing != nil }) == true else { return }
+        autoPinging = true
+        defer { autoPinging = false }
+        let before = missedPings
+        guard let data = try? await Core.run(["auto-ping", "--json"]),
+              let res = try? JSONDecoder().decode(AutoPingResult.self, from: data) else { return }
+        if !res.pinged.isEmpty || Set(res.missed.map { "\($0.id)@\($0.slot)" }) != before {
+            await load(["--cached"])
+        }
+    }
+
+    /// "Wait for the next scheduled ping": drop the missed-ping question.
+    func dismissMissed(_ id: String) {
+        Task {
+            _ = try? await Core.run(["auto-ping", "--dismiss", id, "--json"])
+            await load(["--cached"])
+        }
     }
 
     func refreshAccount(_ id: String) async {
@@ -206,18 +237,22 @@ final class Store: ObservableObject {
 
     var groups: [String] { status?.groups ?? [] }
 
-    func editAccount(_ id: String, label: String? = nil, group: String? = nil, host: String? = nil) {
+    /// `autoPing`: "off", "5h" or "08:00, 13:01".
+    func editAccount(_ id: String, label: String? = nil, group: String? = nil, host: String? = nil, autoPing: String? = nil) {
         Task {
             var args = ["edit", id, "--json"]
             if let label { args += ["--label", label] }
             if let group { args += ["--group", group] }
             if let host { args += ["--host", host] }
+            if let autoPing { args += ["--auto-ping", autoPing] }
+            var failure: String?
             do {
                 _ = try await Core.run(args)
             } catch {
-                loadError = error.localizedDescription
+                failure = error.localizedDescription  // e.g. an invalid auto-ping time
             }
             await refreshAccount(id)
+            if let failure { loadError = failure }  // after the reload, which would clear it
         }
     }
 

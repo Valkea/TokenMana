@@ -44,9 +44,34 @@ struct Account: Decodable, Identifiable {
     let dashboardUrl: String?
     let metrics: [Metric]
     let notes: [String]
+    let autoPing: AutoPing?
 
     var isSetup: Bool { status == "setup" }
     var hasIdleSession: Bool { metrics.contains { $0.key == "session" && $0.idle } }
+}
+
+/// Scheduled pings of an account: every 5 h, or at set times (`ctrack edit --auto-ping`).
+struct AutoPing: Decodable {
+    let mode: String            // interval | times
+    let times: [String]         // "08:00", local clock
+    let lastPing: String?
+    let lastAuto: String?
+    let missed: String?         // a scheduled time this Mac slept through: ask "ping now, or wait?"
+    let error: String?
+    let nextAt: String?
+
+    var nextDate: Date? { nextAt.flatMap(parseISO) }
+    var missedDate: Date? { missed.flatMap(parseISO) }
+}
+
+/// `ctrack auto-ping --json`
+struct AutoPingResult: Decodable {
+    struct Missed: Decodable {
+        let id: String
+        let slot: String
+    }
+    let pinged: [PingResults.Item]
+    let missed: [Missed]
 }
 
 struct Metric: Decodable, Identifiable {

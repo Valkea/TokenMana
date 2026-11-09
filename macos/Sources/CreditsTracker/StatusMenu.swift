@@ -82,7 +82,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             .withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
         image?.isTemplate = true
         button.image = image
-        button.title = showPercent && !text.isEmpty ? " \(text)" : ""
+        var title = showPercent ? text : ""
+        if !store.missedPings.isEmpty { title = title.isEmpty ? "⏰" : "⏰ \(title)" }  // a missed scheduled ping awaits an answer
+        button.title = title.isEmpty ? "" : " \(title)"
         button.toolTip = tip
     }
 
@@ -115,9 +117,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         var parts = [store.groups.joined(separator: ","), "\(store.status?.groupColors ?? [:])", store.loadError ?? "", "\(store.refreshing)", "\(showPercent)", panelAccount, "\(store.launchAtLogin)",
                      "\(store.status == nil)"]
         for a in store.status?.accounts ?? [] {
+            var auto = ""
+            if let ap = a.autoPing { auto = [Fmt.autoPing(ap, now: store.now), ap.missed ?? "", ap.error ?? ""].joined(separator: "/") }
             parts.append([a.id, a.label, a.group ?? "", a.status, a.plan ?? "", a.identity ?? "", a.error ?? "", a.hint ?? "",
                           a.metrics.map { "\($0.key)\($0.idle)\(Fmt.resetLine($0, now: store.now) != nil)" }.joined(),
-                          a.notes.joined(), "\(store.pinging.contains(a.id))", store.pingMessages[a.id]?.text ?? ""]
+                          a.notes.joined(), "\(store.pinging.contains(a.id))", store.pingMessages[a.id]?.text ?? "", auto]
                 .joined(separator: "|"))
         }
         return parts.joined(separator: "\n")
@@ -226,6 +230,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             n.indentationLevel = 0
             menu.addItem(n)
         }
+        if let ap = acc.autoPing { addAutoPingRows(acc, ap) }
         if acc.status == "error" || acc.status == "stale", let err = acc.error {
             let stale = acc.status == "stale"
             let item = info(stale ? "Data from \(Fmt.time(acc.okAt) ?? "earlier") — \(err)" : err,
@@ -240,6 +245,22 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             menu.addItem(info(msg.text, image: MenuIcons.symbol(msg.ok ? "checkmark.circle.fill" : "xmark.octagon.fill",
                                                                  msg.ok ? .systemGreen : .systemRed)))
         }
+    }
+
+    /// "Auto ping every 5h · next 18:02", and for a scheduled time this Mac slept through: Ping Now / Wait.
+    private func addAutoPingRows(_ acc: Account, _ ap: AutoPing) {
+        let line = info(Fmt.autoPing(ap, now: store.now), image: NSImage(systemSymbolName: "timer", accessibilityDescription: nil))
+        if #available(macOS 14.4, *), ap.missed == nil, let err = ap.error { line.subtitle = "Failed: \(err) — trying again in 15 min" }
+        menu.addItem(line)
+        guard ap.missed != nil else { return }
+        let q = Fmt.missedPing(ap, now: store.now)
+        let ping = info("\(q.title) — Ping Now", action: #selector(pingAccount(_:)), represented: acc.id,
+                        image: MenuIcons.symbol("alarm.fill", .systemOrange))
+        if #available(macOS 14.4, *) { ping.subtitle = "\(q.detail). Starts the 5h session now." }
+        ping.isEnabled = !store.pinging.contains(acc.id)
+        menu.addItem(ping)
+        menu.addItem(info(q.wait, action: #selector(dismissMissed(_:)), represented: acc.id,
+                          image: NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)))
     }
 
     /// One aligned row per metric:  ◷ Session · 5h   79%  ▬▬▬▬▭▭  3h 11m · 05:00
@@ -278,6 +299,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             if #available(macOS 14.4, *) { ping.subtitle = "Smallest model, low effort — starts the 5h timer" }
             ping.isEnabled = !store.pinging.contains(acc.id)
             sub.addItem(ping)
+            sub.addItem(autoPingMenuItem(acc))
         }
         if let url = acc.dashboardUrl {
             sub.addItem(action("Open Usage Page", #selector(openURL(_:)), represented: url, symbol: "arrow.up.right.square"))
@@ -381,6 +403,29 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return item
     }
 
+    /// Auto Ping ▸ Off / Every 5 Hours / At Set Times…
+    private func autoPingMenuItem(_ acc: Account) -> NSMenuItem {
+        let item = NSMenuItem(title: "Auto Ping", action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: "timer", accessibilityDescription: nil)
+        if #available(macOS 14.4, *) { item.subtitle = acc.autoPing.map { Fmt.autoPing($0, now: store.now) } ?? "Off" }
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let mode = acc.autoPing?.mode
+        let off = action("Off", #selector(setAutoPing(_:)), represented: [acc.id, "off"])
+        off.state = mode == nil ? .on : .off
+        let every = action("Every 5 Hours", #selector(setAutoPing(_:)), represented: [acc.id, "5h"])
+        every.state = mode == "interval" ? .on : .off
+        if #available(macOS 14.4, *) { every.subtitle = "5 h 1 min after each ping, so a new session starts as the last one ends" }
+        let times = action("At Set Times…", #selector(setAutoPingTimes(_:)), represented: acc.id)
+        times.state = mode == "times" ? .on : .off
+        if #available(macOS 14.4, *) {
+            times.subtitle = mode == "times" ? acc.autoPing?.times.joined(separator: ", ") : "If the Mac sleeps through one, you are asked"
+        }
+        for i in [off, every, times] { sub.addItem(i) }
+        item.submenu = sub
+        return item
+    }
+
     /// Which account's 5h/weekly usage the menu bar shows.
     private func menuBarAccountItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Menu Bar Account", action: nil, keyEquivalent: "")
@@ -456,6 +501,35 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func pingIdle() { store.pingIdle() }
+
+    @objc private func dismissMissed(_ sender: NSMenuItem) {
+        if let acc = account(sender) { store.dismissMissed(acc.id) }
+    }
+
+    @objc private func setAutoPing(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
+        store.editAccount(pair[0], autoPing: pair[1])
+    }
+
+    @objc private func setAutoPingTimes(_ sender: NSMenuItem) {
+        guard let acc = account(sender) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Auto Ping “\(acc.label)” at Set Times"
+        alert.informativeText = "Times on this Mac’s clock (24 h), separated by commas. If the Mac is asleep or off at one "
+            + "of them, you are asked whether to ping then or wait for the next time. Tip: 1 min after a 5h window ends, "
+            + "e.g. 08:00, 13:01, 18:02."
+        let field = NSTextField(string: acc.autoPing?.times.joined(separator: ", ") ?? "")
+        field.placeholderString = "08:00, 13:01, 18:02"
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let times = field.stringValue.trimmingCharacters(in: .whitespaces)
+        store.editAccount(acc.id, autoPing: times.isEmpty ? "off" : times)
+    }
 
     @objc private func refresh() { store.refresh() }
 

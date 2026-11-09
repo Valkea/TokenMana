@@ -7,9 +7,10 @@ GNOME Shell extension. Stdlib only, Python >= 3.9, macOS + Linux.
 
   ctrack status [--json] [--force] [--cached] [ACCOUNT_ID ...]
   ctrack ping   [--json] (--all | --idle | ACCOUNT_ID ...)
+  ctrack auto-ping [--json] [--dismiss ACCOUNT_ID]   run the scheduled pings that are due
   ctrack login  [--json] ACCOUNT_ID
   ctrack add    TYPE [--label L] [--dir D] [--host H] [--command C]   (claude|codex|copilot|command)
-  ctrack edit   ACCOUNT_ID [--label L] [--group G] [--host H]
+  ctrack edit   ACCOUNT_ID [--label L] [--group G] [--host H] [--auto-ping off|5h|HH:MM,...]
   ctrack remove ACCOUNT_ID
   ctrack init   [--force]          write a starter config (auto-detected)
   ctrack paths                     print config / cache locations
@@ -22,7 +23,9 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import contextlib
 import datetime as dt
+import fcntl
 import glob
 import hashlib
 import json
@@ -49,6 +52,7 @@ SECRETS_PATH = os.path.join(CONFIG_DIR, "secrets.json")
 CACHE_DIR = os.environ.get("CTRACK_CACHE_DIR") or os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "creditstracker")
 STATE_PATH = os.path.join(CACHE_DIR, "state.json")
+SCHEDULE_PATH = os.path.join(CACHE_DIR, "autoping.json")
 
 # GUI apps / shell extensions start with a minimal PATH; add the usual places
 # where claude, codex & co. get installed.
@@ -65,6 +69,9 @@ WEEK_WINDOW = 7 * 86400
 COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98"  # GitHub Copilot editor-plugin app (device flow)
 CLAUDE_BETA = "oauth-2025-04-20"
 PING_PROMPT = "Health check. Reply with the single word: pong"
+AUTO_PING_GAP = SESSION_WINDOW + 60   # every-5h mode: 5 h + 1 min after the last ping, so the window has ended
+AUTO_PING_GRACE = 5 * 60              # a scheduled time not reached within this is "missed" (device asleep / off)
+AUTO_PING_RETRY = 15 * 60             # every-5h mode: wait this long after a failed auto ping
 
 
 # ───────────────────────────── helpers ──────────────────────────────────────
@@ -728,6 +735,206 @@ def ping_account(acc):
     return res
 
 
+# ───────────────────────────── auto ping ────────────────────────────────────
+#
+# Per account in config.json (`ctrack edit ID --auto-ping 5h|08:00,13:01|off`):
+#   "auto_ping": {"mode": "interval"}                            5 h 1 min after the last ping
+#   "auto_ping": {"mode": "times", "times": ["08:00", "13:01"]}  at these local times
+# The UIs run `ctrack auto-ping` every minute (cron works too). A scheduled time the device was
+# asleep or off for is not caught up on its own: it becomes a question, "ping now, or wait for the
+# next time?". Run state (last ping, handled times, pending question) is kept in autoping.json.
+
+def parse_ping_times(value):
+    """'8:00, 13:01' or ['08:00', '13h01'] → ['08:00', '13:01'] (sorted, no duplicates)."""
+    items = value if isinstance(value, list) else re.split(r"[\s,;]+", str(value or ""))
+    out = set()
+    for raw in items:
+        s = str(raw).strip()
+        if not s:
+            continue
+        m = re.fullmatch(r"(\d{1,2})(?:[:hH.](\d{2})?)?", s)
+        h, mi = (int(m.group(1)), int(m.group(2) or 0)) if m else (99, 0)
+        if h > 23 or mi > 59:
+            raise ValueError(f"invalid time {s!r} (use HH:MM, 24 h)")
+        out.add(f"{h:02d}:{mi:02d}")
+    return sorted(out)
+
+
+def parse_auto_ping(value):
+    """CLI value → config value: 'off' → None, '5h' → interval, '08:00,13:01' → times."""
+    v = (value or "").strip().lower()
+    if v in ("", "off", "none", "no", "false"):
+        return None
+    if v in ("5h", "interval", "on"):
+        return {"mode": "interval"}
+    times = parse_ping_times(v)
+    return {"mode": "times", "times": times} if times else None
+
+
+def auto_ping_conf(acc):
+    """{"mode": "interval"} | {"mode": "times", "times": [...]} | None (off, or the account has no ping)."""
+    c = acc.get("auto_ping")
+    if not isinstance(c, dict) or not PROVIDERS[acc["type"]]["ping"] or acc.get("ping") is False:
+        return None
+    if c.get("mode") == "interval":
+        return {"mode": "interval"}
+    if c.get("mode") == "times":
+        try:
+            times = parse_ping_times(c.get("times") or [])
+        except ValueError:
+            return None
+        return {"mode": "times", "times": times} if times else None
+    return None
+
+
+def auto_ping_sig(conf):
+    return json.dumps(conf, sort_keys=True)
+
+
+def local_slots(times, start, end):
+    """Scheduled times (local clock) in (start, end], oldest first."""
+    out = []
+    day, last = start.astimezone().date(), end.astimezone().date()
+    while day <= last:
+        for t in times:
+            h, m = map(int, t.split(":"))
+            slot = dt.datetime(day.year, day.month, day.day, h, m).astimezone()  # naive = local time
+            if start < slot <= end:
+                out.append(slot)
+        day += dt.timedelta(days=1)
+    return out
+
+
+def next_slot(times, after):
+    slots = local_slots(times, after, after + dt.timedelta(days=2))
+    return slots[0] if slots else None
+
+
+def session_busy_until(entry):
+    """End of the account's running 5 h session + 1 min, from its cached fetch; None if none is known."""
+    if (entry or {}).get("status") == "setup":
+        return None
+    for m in ((entry or {}).get("data") or {}).get("metrics") or []:
+        if m.get("key") == "session" and not m.get("idle"):
+            reset = parse_time(m.get("resets_at"))
+            return reset + dt.timedelta(seconds=60) if reset else None
+    return None
+
+
+@contextlib.contextmanager
+def schedule_state():
+    """Locked read-modify-write of autoping.json (the UI timer, manual pings and cron can overlap)."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(SCHEDULE_PATH + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = read_json(SCHEDULE_PATH, {}) or {}
+        yield data
+        write_json(SCHEDULE_PATH, data)
+
+
+def auto_ping_step(conf, entry, e, now):
+    """Is a ping due for this account? Returns the time it is for, or None.
+    entry: the account's cached fetch (state.json); e: its schedule record, updated in place."""
+    sig = auto_ping_sig(conf)
+    if e.get("sig") != sig:  # new or changed schedule: start from now, ask nothing about the past
+        e.update(sig=sig, handled_until=iso(now), missed=None, error=None, retry_at=None)
+    if entry.get("status") == "setup":  # not signed in on this device
+        return None
+    busy = session_busy_until(entry)
+    running = busy is not None and now < busy
+    if conf["mode"] == "interval":
+        last, retry = parse_time(e.get("last_ping")), parse_time(e.get("retry_at"))
+        if running or (retry and now < retry) or (last and now < last + dt.timedelta(seconds=AUTO_PING_GAP)):
+            return None
+        return now
+    handled = parse_time(e.get("handled_until")) or now
+    slots = local_slots(conf["times"], max(handled, now - dt.timedelta(days=7)), now)
+    e["handled_until"] = iso(now)
+    if slots and (now - slots[-1]).total_seconds() <= AUTO_PING_GRACE:
+        e.update(missed=None, error=None)
+        return slots[-1]
+    if slots:  # slept through it (several missed times make one question)
+        e.update(missed=iso(slots[-1]), error=None)
+    if running:  # a session is already going: nothing to start, nothing to ask
+        e.update(missed=None, error=None)
+    return None
+
+
+def auto_ping_info(acc, e, entry, now):
+    """For the UIs: the schedule, when the next ping is, a pending question, the last error."""
+    conf = auto_ping_conf(acc)
+    if not conf:
+        return None
+    e = e or {}
+    current = e.get("sig") == auto_ping_sig(conf)  # a record from an older schedule: only its pings count
+    info = {"mode": conf["mode"], "times": conf.get("times", []), "last_ping": e.get("last_ping"),
+            "last_auto": e.get("last_auto"), "missed": e.get("missed") if current else None,
+            "error": e.get("error") if current else None, "next_at": None}
+    if (entry or {}).get("status") == "setup":
+        return info
+    if conf["mode"] == "times":
+        info["next_at"] = iso(next_slot(conf["times"], now))
+    else:
+        last = parse_time(e.get("last_ping"))
+        when = [now, session_busy_until(entry), parse_time(e.get("retry_at")) if current else None,
+                last + dt.timedelta(seconds=AUTO_PING_GAP) if last else None]
+        info["next_at"] = iso(max(t for t in when if t))
+    return info
+
+
+def record_pings(results):
+    """Successful pings restart the every-5h chain and answer a pending question."""
+    now = iso(utcnow())
+    if not any(r["ok"] for r in results):
+        return
+    with schedule_state() as s:
+        for r in results:
+            if r["ok"]:
+                s.setdefault(r["id"], {}).update(last_ping=now, missed=None, error=None, retry_at=None)
+
+
+def run_auto_pings(cfg):
+    accs = {}
+    for a in cfg["accounts"]:
+        conf = auto_ping_conf(a) if enabled_here(a) else None
+        if conf:
+            accs[a["id"]] = (a, conf)
+    state = read_json(STATE_PATH, {}) or {}
+    now = utcnow()
+    due = {}
+    if accs:
+        with schedule_state() as s:
+            for i, (a, conf) in accs.items():
+                slot = auto_ping_step(conf, state.get(i) or {}, s.setdefault(i, {}), now)
+                if slot:
+                    due[i] = slot
+    results = []
+    if due:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(ping_account, [accs[i][0] for i in due]))
+        done = utcnow()
+        with schedule_state() as s:
+            for r in results:
+                e = s.setdefault(r["id"], {})
+                r["slot"] = iso(due[r["id"]])
+                if r["ok"]:
+                    e.update(last_ping=iso(done), last_auto=iso(done), missed=None, error=None, retry_at=None)
+                elif accs[r["id"]][1]["mode"] == "times":  # ask: try again now, or wait for the next time
+                    e.update(missed=r["slot"], error=r.get("error"))
+                else:
+                    e.update(error=r.get("error"), retry_at=iso(done + dt.timedelta(seconds=AUTO_PING_RETRY)))
+        ok = [r["id"] for r in results if r["ok"]]
+        if ok:
+            time.sleep(2)
+            collect(cfg, ids=ok, force=True)
+    sched = read_json(SCHEDULE_PATH, {}) or {}
+    now = utcnow()
+    missed = [{"id": i, "label": a.get("label") or i, "slot": sched[i]["missed"], "error": sched[i].get("error"),
+               "next": iso(next_slot(conf["times"], now)) if conf["mode"] == "times" else None}
+              for i, (a, conf) in accs.items() if (sched.get(i) or {}).get("missed")]
+    return {"pinged": results, "missed": missed}
+
+
 # ───────────────────────────── login ────────────────────────────────────────
 
 def emit(event, as_json, **kw):
@@ -942,6 +1149,17 @@ def cmd_edit(args):
             state = read_json(STATE_PATH, {}) or {}
             if state.pop(acc["id"], None) is not None:
                 write_json(STATE_PATH, state)
+    if args.auto_ping is not None:
+        try:
+            conf = parse_auto_ping(args.auto_ping)
+        except ValueError as e:
+            raise SystemExit(f"ctrack: {e}") from None
+        if conf and (not PROVIDERS[acc["type"]]["ping"] or acc.get("ping") is False):
+            raise SystemExit(f"ctrack: {acc['id']} has no ping, so no auto ping")
+        if conf:
+            acc["auto_ping"] = conf
+        else:
+            acc.pop("auto_ping", None)
     write_json(CONFIG_PATH, cfg)
     print(json.dumps(acc) if args.json else f"updated {acc['id']}")
     return 0
@@ -996,6 +1214,9 @@ def cmd_remove(args):
     state = read_json(STATE_PATH, {}) or {}
     if state.pop(args.account, None) is not None:
         write_json(STATE_PATH, state)
+    if args.account in (read_json(SCHEDULE_PATH, {}) or {}):
+        with schedule_state() as s:
+            s.pop(args.account, None)
     print(json.dumps({"removed": args.account}) if args.json else f"removed {args.account}")
     return 0
 
@@ -1057,7 +1278,7 @@ def cli_command(acc):
     return None
 
 
-def build_account(acc, entry, now):
+def build_account(acc, entry, now, sched=None):
     prov = PROVIDERS[acc["type"]]
     data = entry.get("data") or {}
     status = entry.get("status") or "pending"
@@ -1077,6 +1298,7 @@ def build_account(acc, entry, now):
         "group": (acc.get("group") or "").strip() or None,
         "metrics": [decay(m, now) for m in data.get("metrics", [])] if status != "setup" else [],
         "notes": data.get("notes", []) if status != "setup" else [],
+        "auto_ping": auto_ping_info(acc, (sched or {}).get(acc["id"]), entry, now),
     }
 
 
@@ -1139,7 +1361,8 @@ def collect(cfg, ids=None, force=False, cached=False):
             list(pool.map(lambda a: fetch_into_state(a, state), due))
         write_json(STATE_PATH, state)
     now = utcnow()
-    out = [build_account(a, state.get(a["id"]) or {}, now) for a in accounts]
+    sched = read_json(SCHEDULE_PATH, {}) or {}
+    out = [build_account(a, state.get(a["id"]) or {}, now, sched) for a in accounts]
     out.sort(key=lambda a: (group_rank(cfg, a["group"]), a["label"].casefold()))
     groups = sorted({a["group"] for a in out if a["group"]} | set(cfg.get("groups") or []),
                     key=lambda g: group_rank(cfg, g))
@@ -1186,6 +1409,19 @@ def print_human(result):
             print(f"  {m['label']:<26} {bar:<10} {m['text']:>16}  {c('2', when)}")
         for n in a["notes"]:
             print(f"  {c('2', '• ' + n)}")
+        ap = a.get("auto_ping")
+        if ap:
+            def hm(v):
+                return parse_time(v).astimezone().strftime("%H:%M")
+            line = "Auto ping " + ("every 5h" if ap["mode"] == "interval" else "at " + ", ".join(ap["times"]))
+            if ap.get("next_at"):
+                line += f" · next {hm(ap['next_at'])}"
+            print(f"  {c('2', '⏱ ' + line)}")
+            if ap.get("missed"):
+                print(f"  {c('33', '? ' + hm(ap['missed']) + ' ping ' + ('failed' if ap.get('error') else 'missed'))}"
+                      + f"  {c('2', '→ ctrack ping ' + a['id'] + '  |  ctrack auto-ping --dismiss ' + a['id'])}")
+            elif ap.get("error"):
+                print(f"  {c('31', '! Auto ping failed: ' + ap['error'])}")
         if a.get("error"):
             print(f"  {c('31', '! ' + a['error'])}" + (f"  {c('2', '→ ' + a['hint'])}" if a.get("hint") else ""))
         print()
@@ -1215,6 +1451,7 @@ def cmd_ping(args):
         raise SystemExit("ctrack ping: give account ids, --all or --idle")
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(ping_account, accs))
+    record_pings(results)
     if any(r["ok"] for r in results):
         time.sleep(2)
         collect(cfg, ids=[r["id"] for r in results if r["ok"]], force=True)
@@ -1226,6 +1463,38 @@ def cmd_ping(args):
         if not results:
             print("nothing to ping")
     return 0 if all(r["ok"] for r in results) else 1
+
+
+def cmd_auto_ping(args):
+    cfg = load_config()
+    if args.dismiss:  # "wait for the next scheduled time"
+        with schedule_state() as s:
+            for i in args.dismiss:
+                if i in s:
+                    s[i].update(missed=None, error=None)
+        print(json.dumps({"dismissed": args.dismiss}) if args.json else "ok")
+        return 0
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(SCHEDULE_PATH + ".run", "a") as run_lock:
+        try:  # one run at a time: a ping can outlast the UIs' one-minute timer
+            fcntl.flock(run_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print(json.dumps({"busy": True, "pinged": [], "missed": []}) if args.json else "already running")
+            return 0
+        res = run_auto_pings(cfg)
+    if args.json:
+        print(json.dumps(dict(res, busy=False)))
+        return 0
+    for r in res["pinged"]:
+        print(f"{r['id']}: " + (f"pinged ({r['seconds']}s)" if r["ok"] else f"FAILED — {r.get('error')}"))
+    for m in res["missed"]:
+        when = parse_time(m["slot"]).astimezone().strftime("%H:%M")
+        nxt = f", next at {parse_time(m['next']).astimezone().strftime('%H:%M')}" if m.get("next") else ""
+        print(f"{m['id']}: {when} ping " + (f"failed ({m['error']})" if m.get("error") else "missed")
+              + f"{nxt} — `ctrack ping {m['id']}` now, or `ctrack auto-ping --dismiss {m['id']}` to wait")
+    if not res["pinged"] and not res["missed"]:
+        print("nothing due")
+    return 0
 
 
 def cmd_init(args):
@@ -1259,6 +1528,10 @@ def main(argv=None):
     p.add_argument("--all", action="store_true")
     p.add_argument("--idle", action="store_true", help="only accounts whose 5h session is not running")
     p.add_argument("--json", action="store_true")
+    au = sub.add_parser("auto-ping", help="run the scheduled pings that are due (the UIs call it every minute)")
+    au.add_argument("--dismiss", action="append", metavar="ACCOUNT_ID",
+                     help="drop the 'missed scheduled ping' question: wait for the next scheduled time")
+    au.add_argument("--json", action="store_true")
     lg = sub.add_parser("login", help="sign an account in on this device")
     lg.add_argument("account")
     lg.add_argument("--json", action="store_true", help="stream JSON events (for the UIs)")
@@ -1277,6 +1550,8 @@ def main(argv=None):
     ed.add_argument("--label")
     ed.add_argument("--group", help='group name, "" to remove from its group')
     ed.add_argument("--host", help="Copilot: github.com or e.g. mycorp.ghe.com (clears the stored token)")
+    ed.add_argument("--auto-ping", metavar="off|5h|HH:MM,...",
+                    help="ping on its own: 5h = 5 h 1 min after each ping; or at these local times; off")
     ed.add_argument("--json", action="store_true")
     rg = sub.add_parser("rename-group", help='rename a group ("" to ungroup its accounts)')
     rg.add_argument("old")
@@ -1293,7 +1568,7 @@ def main(argv=None):
     i.add_argument("--force", action="store_true")
     sub.add_parser("paths")
     args = ap.parse_args(argv)
-    handlers = {"status": cmd_status, "ping": cmd_ping, "login": cmd_login, "add": cmd_add, "edit": cmd_edit, "rename-group": cmd_rename_group, "group-color": cmd_group_color, "remove": cmd_remove,
+    handlers = {"status": cmd_status, "ping": cmd_ping, "auto-ping": cmd_auto_ping, "login": cmd_login, "add": cmd_add, "edit": cmd_edit, "rename-group": cmd_rename_group, "group-color": cmd_group_color, "remove": cmd_remove,
                 "init": cmd_init, "paths": cmd_paths}
     if not args.cmd:
         args = ap.parse_args(["status"] + (argv or sys.argv[1:]))

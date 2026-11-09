@@ -52,6 +52,26 @@ enum Fmt {
         guard let iso, let d = parseISO(iso) else { return nil }
         return clock(d, now: Date())
     }
+
+    /// "Auto ping every 5h · next 18:02" / "Auto ping at 08:00, 13:01 · next 13:01"
+    static func autoPing(_ ap: AutoPing, now: Date) -> String {
+        var s = ap.mode == "interval" ? "Auto ping every 5h" : "Auto ping at \(ap.times.joined(separator: ", "))"
+        if let next = ap.nextDate {
+            s += next.timeIntervalSince(now) <= 30 ? " · due now" : " · next \(clock(next, now: now))"
+        }
+        return s
+    }
+
+    /// The question for a scheduled ping this Mac slept through (or that failed).
+    static func missedPing(_ ap: AutoPing, now: Date) -> (title: String, detail: String, wait: String, question: String) {
+        let at = ap.missedDate.map { clock($0, now: now) } ?? "Scheduled"
+        let next = ap.nextDate.map { clock($0, now: now) }
+        let title = ap.error != nil ? "\(at) auto ping failed" : "\(at) auto ping missed"
+        let detail = ap.error ?? "This Mac was asleep or off at that time"
+        let question = "\(title): \(ap.error ?? "this Mac was asleep or off"). Ping now to start the 5h session"
+            + (next.map { ", or wait for \($0)?" } ?? "?")
+        return (title, detail, next.map { "Wait for \($0)" } ?? "Skip", question)
+    }
 }
 
 // MARK: - Vendor badge (menu item image)

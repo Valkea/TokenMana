@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MissedPingNotifier.shared.start()
         statusMenu = StatusMenuController(store: Store.shared)
     }
 }

@@ -10,6 +10,7 @@ import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
@@ -94,6 +95,41 @@ function openUri(uri) {
 
 function copyText(text) {
     St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
+}
+
+// Notification with action buttons (GNOME 46+ API, with the GNOME 45 one as fallback).
+function notifyWithActions(source, title, body, actions) {
+    let n;
+    if (typeof source.addNotification === 'function') {
+        n = new MessageTray.Notification({source, title, body, urgency: MessageTray.Urgency.HIGH});
+    } else {
+        n = new MessageTray.Notification(source, title, body);
+        n.setUrgency(MessageTray.Urgency.HIGH);
+    }
+    for (const [text, callback] of actions)
+        n.addAction(text, callback);
+    if (typeof source.addNotification === 'function')
+        source.addNotification(n);
+    else
+        source.showNotification(n);
+    return n;
+}
+
+// "every 5h" / "at 08:00, 13:01" (+ "· next 13:01").
+function autoPingText(ap, now) {
+    let text = ap.mode === 'interval' ? 'Auto ping every 5h' : `Auto ping at ${ap.times.join(', ')}`;
+    if (ap.next_at) {
+        const next = new Date(ap.next_at);
+        text += next - now <= 30e3 ? ' · due now' : ` · next ${clock(next, now)}`;
+    }
+    return text;
+}
+
+// The value `ctrack edit --auto-ping` takes for an edit form's choice.
+function autoPingArg(mode, times) {
+    if (mode === 'interval')
+        return '5h';
+    return mode === 'times' && times.trim() ? times.trim() : 'off';
 }
 
 // How each terminal takes a command to run; others get the Debian `-e cmd args...` convention.
@@ -243,6 +279,10 @@ const Indicator = GObject.registerClass({
         this._edit = null;         // {id, type, label, host, origHost}
         this._confirmRemove = null;
         this._lastLoaded = null;
+        this._autoPinging = false;
+        this._notifSource = null;
+        this._missedNotifs = new Map();   // account id → notification asking about a missed scheduled ping
+        this._notifiedMissed = new Set(); // "id@slot" already notified (closing it doesn't bring it back)
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         box.add_child(new St.Icon({
@@ -274,9 +314,9 @@ const Indicator = GObject.registerClass({
         // first click ('open-state-changed' never fires otherwise).
         this._render();
 
-        this._load(['--cached']).then(() => this._load([]));
+        this._load(['--cached']).then(() => this._load([])).then(() => this._autoPing());
         this._pollId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, POLL_SECONDS, () => {
-            this._load([], true);
+            this._load([], true).then(() => this._autoPing());
             return GLib.SOURCE_CONTINUE;
         });
         this._tickId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, TICK_SECONDS, () => {
@@ -354,6 +394,89 @@ const Indicator = GObject.registerClass({
             }
             return GLib.SOURCE_REMOVE;
         });
+    }
+
+    // Scheduled pings: the core decides what is due (every 5h, or at set times) and pings it.
+    async _autoPing() {
+        const accounts = this._status?.accounts ?? [];
+        if (this._destroyed || this._autoPinging || !accounts.some(a => a.auto_ping))
+            return;
+        this._autoPinging = true;
+        try {
+            const res = await this._core.json(['auto-ping', '--json']);
+            const before = accounts.filter(a => a.auto_ping?.missed).map(a => `${a.id}@${a.auto_ping.missed}`).sort();
+            const after = (res.missed ?? []).map(m => `${m.id}@${m.slot}`).sort();
+            if (!this._destroyed && ((res.pinged ?? []).length || before.join() !== after.join()))
+                await this._load(['--cached']);
+        } catch (e) {
+            if (!this._destroyed)
+                logError(e, 'CreditsTracker: auto ping');
+        } finally {
+            this._autoPinging = false;
+        }
+    }
+
+    // "Wait for the next scheduled ping": drop the missed-ping question.
+    async _dismissMissed(id) {
+        try {
+            await this._core.run(['auto-ping', '--dismiss', id, '--json']);
+        } catch (e) {
+            this._error = e.message;
+        }
+        await this._load(['--cached']);
+    }
+
+    // One notification per missed scheduled ping, gone once it is answered (here or in the menu).
+    _syncMissedNotifications() {
+        const pending = new Map((this._status?.accounts ?? [])
+            .filter(a => a.auto_ping?.missed).map(a => [a.id, a]));
+        for (const [id, {notification, slot}] of this._missedNotifs) {
+            if (pending.get(id)?.auto_ping.missed !== slot) {
+                this._missedNotifs.delete(id);
+                notification.destroy();
+            }
+        }
+        for (const [id, acc] of pending) {
+            const key = `${id}@${acc.auto_ping.missed}`;
+            if (this._missedNotifs.has(id) || this._notifiedMissed.has(key))
+                continue;
+            this._notifiedMissed.add(key);
+            const now = new Date();
+            const {question, waitLabel} = this._missedQuestion(acc, now);
+            try {
+                if (!this._notifSource) {
+                    this._notifSource = typeof MessageTray.Source.prototype.addNotification === 'function'
+                        ? new MessageTray.Source({title: 'CreditsTracker', iconName: 'alarm-symbolic'})
+                        : new MessageTray.Source('CreditsTracker', 'alarm-symbolic');
+                    this._notifSource.connect('destroy', () => {
+                        this._notifSource = null;
+                    });
+                    Main.messageTray.add(this._notifSource);
+                }
+                const n = notifyWithActions(this._notifSource, acc.label, question, [
+                    ['Ping now', () => this._ping([id])],
+                    [waitLabel, () => this._dismissMissed(id)],
+                ]);
+                this._missedNotifs.set(id, {notification: n, slot: acc.auto_ping.missed});
+                n.connect('destroy', () => {
+                    if (this._missedNotifs.get(id)?.notification === n)
+                        this._missedNotifs.delete(id);
+                });
+            } catch (e) {
+                logError(e, 'CreditsTracker: notification');
+                Main.notify(acc.label, question);
+            }
+        }
+    }
+
+    _missedQuestion(acc, now) {
+        const ap = acc.auto_ping;
+        const at = clock(new Date(ap.missed), now);
+        const next = ap.next_at ? clock(new Date(ap.next_at), now) : null;
+        const question = ap.error
+            ? `The ${at} auto ping failed: ${ap.error}. Ping now${next ? `, or wait for ${next}` : ''}?`
+            : `The ${at} auto ping was missed (this computer was asleep or off). Ping now to start the 5h session${next ? `, or wait for ${next}` : ''}?`;
+        return {question, waitLabel: next ? `Wait for ${next}` : 'Skip'};
     }
 
     _startLogin(acc) {
@@ -467,10 +590,13 @@ const Indicator = GObject.registerClass({
     // ── rendering ──
 
     _update() {
-        const text = this._settings.get_boolean('show-percent') ? this._panelText() : '';
+        let text = this._settings.get_boolean('show-percent') ? this._panelText() : '';
+        if ((this._status?.accounts ?? []).some(a => a.auto_ping?.missed))
+            text = text ? `⏰ ${text}` : '⏰';   // a missed scheduled ping is waiting for an answer
         this._panelLabel.text = text;
         this._panelLabel.visible = !!text;
         this._refreshAccountChoices();
+        this._syncMissedNotifications();
         // Rebuild while closed too, so the menu is never empty and opens on current data.
         // Don't rebuild it under the user's fingers while a form is being typed in.
         if (!this._addForm && !this._edit)
@@ -646,8 +772,10 @@ const Indicator = GObject.registerClass({
 
     _startEdit(acc) {
         this._addForm = null;
+        const autoMode = acc.auto_ping?.mode ?? 'off', autoTimes = (acc.auto_ping?.times ?? []).join(', ');
         this._edit = {id: acc.id, type: acc.type, label: acc.label, host: acc.host ?? '', origHost: acc.host ?? '',
-            group: acc.group ?? '', origGroup: acc.group ?? ''};
+            group: acc.group ?? '', origGroup: acc.group ?? '', canPing: acc.can_ping,
+            autoMode, autoTimes, origAuto: autoPingArg(autoMode, autoTimes)};
         this._render();
     }
 
@@ -663,13 +791,19 @@ const Indicator = GObject.registerClass({
         const hostChanged = e.type === 'copilot' && e.host.trim() !== e.origHost;
         if (hostChanged)
             args.push('--host', e.host.trim());
+        const auto = autoPingArg(e.autoMode, e.autoTimes);
+        if (e.canPing && auto !== e.origAuto)
+            args.push('--auto-ping', auto);
         this._edit = null;
+        let failure = null;
         try {
             await this._core.run(args);
         } catch (err) {
-            this._error = err.message;
+            failure = err.message;   // e.g. an invalid auto-ping time
         }
         await this._refreshAccount(e.id);
+        if (failure)
+            this._error = failure;   // after the reload, which would clear it
         const acc = this._status?.accounts.find(a => a.id === e.id);
         if (hostChanged && acc?.can_login)
             this._startLogin(acc);   // the old host's token was dropped
@@ -702,6 +836,8 @@ const Indicator = GObject.registerClass({
             box.add_child(host);
             box.add_child(label('Changing the host signs this account out; you will be asked to sign in on the new host.', 'ct-dim', {wrap: true}));
         }
+        if (e.canPing)
+            this._autoPingFields(box, e);
         const actions = new St.BoxLayout({style_class: 'ct-row', x_align: Clutter.ActorAlign.END});
         actions.add_child(textButton('Save', () => this._saveEdit()));
         box.add_child(actions);
@@ -711,6 +847,33 @@ const Indicator = GObject.registerClass({
                 name.grab_key_focus();
             return GLib.SOURCE_REMOVE;
         });
+    }
+
+    // Auto ping: Off / Every 5h / At times (+ the times).
+    _autoPingFields(box, e) {
+        const row = new St.BoxLayout({style_class: 'ct-row'});
+        row.add_child(label('Auto ping', 'ct-dim'));
+        for (const [mode, name] of [['off', 'Off'], ['interval', 'Every 5h'], ['times', 'At times']]) {
+            row.add_child(textButton(name, () => {
+                e.autoMode = mode;
+                this._render();
+            }, e.autoMode === mode ? 'ct-btn-selected' : ''));
+        }
+        box.add_child(row);
+        if (e.autoMode === 'times') {
+            const times = new St.Entry({hint_text: 'Times, e.g. 08:00, 13:01, 18:02', text: e.autoTimes, can_focus: true, x_expand: true});
+            times.clutter_text.connect('text-changed', () => {
+                e.autoTimes = times.get_text();
+            });
+            times.clutter_text.connect('activate', () => this._saveEdit());
+            box.add_child(times);
+        }
+        const help = {
+            interval: 'Pings again 5 h 1 min after each ping (yours or its own), so a new 5h session starts as soon as the previous one ends.',
+            times: 'Pings at these times (24 h, this computer’s clock). If it was asleep or off at one of them, you are asked whether to ping then or wait for the next time.',
+        }[e.autoMode];
+        if (help)
+            box.add_child(label(help, 'ct-dim', {wrap: true}));
     }
 
     _renderLogin() {
@@ -789,7 +952,7 @@ const Indicator = GObject.registerClass({
             }));
         if (acc.dashboard_url)
             head.add_child(iconButton('web-browser-symbolic', 'Open usage page', () => openUri(acc.dashboard_url)));
-        head.add_child(iconButton('document-edit-symbolic', 'Rename, group, host', () => this._startEdit(acc)));
+        head.add_child(iconButton('document-edit-symbolic', 'Rename, group, host, auto ping', () => this._startEdit(acc)));
         head.add_child(this._removeButton(acc));
         card.add_child(head);
 
@@ -797,6 +960,8 @@ const Indicator = GObject.registerClass({
             card.add_child(this._metricRow(m, now));
         for (const n of acc.notes)
             card.add_child(label(`• ${n}`, 'ct-dim', {wrap: true}));
+        if (acc.auto_ping)
+            this._renderAutoPing(card, acc, now);
         if ((acc.status === 'error' || acc.status === 'stale') && acc.error) {
             const when = acc.ok_at ? clock(new Date(acc.ok_at), now) : 'earlier';
             card.add_child(label(acc.status === 'stale' ? `Last data from ${when} — ${acc.error}` : acc.error,
@@ -808,6 +973,24 @@ const Indicator = GObject.registerClass({
         if (msg)
             card.add_child(label(msg.text, msg.ok ? 'ct-ok' : 'ct-error', {wrap: true}));
         this._item(card);
+    }
+
+    // Schedule line, plus the "missed scheduled ping: ping now or wait?" question.
+    _renderAutoPing(card, acc, now) {
+        const ap = acc.auto_ping;
+        card.add_child(label(`⏱ ${autoPingText(ap, now)}`, 'ct-faint'));
+        if (ap.missed) {
+            const box = new St.BoxLayout({vertical: true, style_class: 'ct-question'});
+            const {question, waitLabel} = this._missedQuestion(acc, now);
+            box.add_child(label(`⏰ ${question}`, 'ct-warn', {wrap: true}));
+            const row = new St.BoxLayout({style_class: 'ct-row', x_align: Clutter.ActorAlign.END});
+            row.add_child(textButton(this._pinging.has(acc.id) ? 'Pinging…' : 'Ping now', () => this._ping([acc.id])));
+            row.add_child(textButton(waitLabel, () => this._dismissMissed(acc.id)));
+            box.add_child(row);
+            card.add_child(box);
+        } else if (ap.error) {
+            card.add_child(label(`Auto ping failed: ${ap.error} — trying again in 15 min`, 'ct-error', {wrap: true}));
+        }
     }
 
     _removeButton(acc) {
@@ -856,7 +1039,7 @@ const Indicator = GObject.registerClass({
         row.add_child(label(acc.host ? `${acc.label} · ${acc.host}` : acc.label, 'ct-dim', {x_expand: true}));
         if (acc.can_login)
             row.add_child(textButton('Sign in', () => this._startLogin(acc)));
-        row.add_child(iconButton('document-edit-symbolic', 'Rename, group, host', () => this._startEdit(acc)));
+        row.add_child(iconButton('document-edit-symbolic', 'Rename, group, host, auto ping', () => this._startEdit(acc)));
         row.add_child(this._removeButton(acc));
         this._item(row);
     }
@@ -918,6 +1101,8 @@ const Indicator = GObject.registerClass({
         this._settingsChangedId = null;
         this._loginProc?.force_exit();
         this._core.destroy();
+        this._notifSource?.destroy();
+        this._notifSource = null;
         super.destroy();
     }
 });

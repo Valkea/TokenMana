@@ -55,6 +55,8 @@
 .ct-btn-selected { background-color: #3584e4; color: #fff; }
 .ct-btn-danger { background-color: #e01b24; color: #fff; }
 
+.ct-question { padding: 8px 10px; border-radius: 8px; background-color: rgba(255, 179, 64, 0.14); spacing: 6px; }
+
 .ct-section-title { font-size: 8pt; font-weight: bold; color: #858585; padding-top: 4px; }
 .ct-code { font-family: monospace; font-size: 16pt; font-weight: bold; }
 .ct-login { padding: 10px 12px; border-radius: 12px; background-color: rgba(53, 132, 228, 0.18); spacing: 6px; width: 364px; }
