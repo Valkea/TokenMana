@@ -308,7 +308,21 @@ CLAUDE_LIMIT_LABELS = {
     "weekly_all": "Weekly",
     "weekly_opus": "Weekly · Opus",
     "weekly_sonnet": "Weekly · Sonnet",
+    "weekly_scoped": "Weekly",
 }
+
+
+def claude_scope_name(scope):
+    """Readable name of a limit's scope: a string, or {"model": {...}, "surface": ...} objects."""
+    if not scope:
+        return ""
+    if isinstance(scope, str):
+        return scope
+    if isinstance(scope, dict):
+        if "display_name" in scope or "id" in scope:
+            return str(scope.get("display_name") or scope.get("id") or "")
+        return " · ".join(n for n in (claude_scope_name(v) for v in scope.values()) if n)
+    return str(scope)
 
 
 def claude_dir(acc):
@@ -390,12 +404,15 @@ def fetch_claude(acc):
         for lim in limits:
             kind, group = lim.get("kind") or "", lim.get("group") or ""
             label = CLAUDE_LIMIT_LABELS.get(kind) or kind.replace("_", " ").title()
-            if lim.get("scope"):
-                label += f" · {lim['scope']}"
+            key = kind
+            scope = claude_scope_name(lim.get("scope"))
+            if scope:
+                label += f" · {scope}"
+                key += "_" + re.sub(r"[^a-z0-9]+", "_", scope.lower()).strip("_")
             window = SESSION_WINDOW if group == "session" else WEEK_WINDOW if group == "weekly" else None
             pct = lim.get("percent")
             idle = group == "session" and not pct and not lim.get("resets_at")
-            metrics.append(metric("session" if kind == "session" else kind, label, pct,
+            metrics.append(metric("session" if kind == "session" else key, label, pct,
                                   resets_at=lim.get("resets_at"), window=window, idle=idle))
     else:
         for key, mkey, label, window in (("five_hour", "session", "Session · 5h", SESSION_WINDOW),
