@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 import webbrowser
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 IS_MAC = sys.platform == "darwin"
 HOME = os.path.expanduser("~")
 
@@ -690,15 +690,28 @@ def fetch_copilot(acc):
 
 
 PROVIDERS = {
-    "claude": {"fetch": fetch_claude, "vendor": "anthropic", "ping": True,
+    "claude": {"fetch": fetch_claude, "vendor": "anthropic", "ping": True, "login": True,
                "dashboard": "https://claude.ai/settings/usage"},
-    "command": {"fetch": fetch_command, "vendor": "command", "ping": False,
-                "dashboard": None, "refresh_minutes": 15},
-    "codex": {"fetch": fetch_codex, "vendor": "openai", "ping": True,
+    "codex": {"fetch": fetch_codex, "vendor": "openai", "ping": True, "login": True,
               "dashboard": "https://chatgpt.com/codex/settings/usage"},
-    "copilot": {"fetch": fetch_copilot, "vendor": "github", "ping": False,
+    "copilot": {"fetch": fetch_copilot, "vendor": "github", "ping": False, "login": True,
                 "dashboard": "https://github.com/settings/copilot"},
+    "command": {"fetch": fetch_command, "vendor": "command", "ping": False, "login": False,
+                "dashboard": None, "refresh_minutes": 15},
 }
+
+
+def fetch_unknown(acc):
+    raise ProviderError(f"Unknown account type {acc.get('type')!r}",
+                        hint="Update CreditsTracker, or remove this account", setup=True)
+
+
+UNKNOWN_PROVIDER = {"fetch": fetch_unknown, "vendor": "unknown", "ping": False, "login": False, "dashboard": None}
+
+
+def provider(acc):
+    """The account's provider; a config written by a newer or extended version may name other types."""
+    return PROVIDERS.get(acc.get("type"), UNKNOWN_PROVIDER)
 
 
 # ───────────────────────────── ping ─────────────────────────────────────────
@@ -791,7 +804,7 @@ def parse_auto_ping(value):
 def auto_ping_conf(acc):
     """{"mode": "interval"} | {"mode": "times", "times": [...]} | None (off, or the account has no ping)."""
     c = acc.get("auto_ping")
-    if not isinstance(c, dict) or not PROVIDERS[acc["type"]]["ping"] or acc.get("ping") is False:
+    if not isinstance(c, dict) or not provider(acc)["ping"] or acc.get("ping") is False:
         return None
     if c.get("mode") == "interval":
         return {"mode": "interval"}
@@ -1045,7 +1058,7 @@ def cmd_login(args):
             if rc == 0 and not default and len(new) == 1:
                 update_account(acc["id"], keychain_service=new[0])
             return rc
-        if t == "command":
+        if not provider(acc)["login"]:
             emit("error", args.json, message=acc.get("login_hint") or "This account has no sign-in")
             return 1
     except (ProviderError, ApiError) as e:
@@ -1076,10 +1089,6 @@ def load_config():
         cfg = {"refresh_minutes": DEFAULT_REFRESH_MIN, "menubar": "max", "accounts": autodetect_accounts()}
         write_json(CONFIG_PATH, cfg)
     cfg.setdefault("accounts", [])
-    for a in cfg["accounts"]:
-        if a.get("type") not in PROVIDERS:
-            raise SystemExit(f"ctrack: account {a.get('id')!r} has unknown type {a.get('type')!r} "
-                             f"(expected one of {', '.join(PROVIDERS)})")
     return cfg
 
 
@@ -1137,7 +1146,7 @@ def cmd_add(args):
     if args.json:
         print(json.dumps(acc))
     else:
-        print(f"added {acc_id}" + (f" — sign in with: ctrack login {acc_id}" if t != "command" else ""))
+        print(f"added {acc_id}" + (f" — sign in with: ctrack login {acc_id}" if PROVIDERS[t]["login"] else ""))
     return 0
 
 
@@ -1171,7 +1180,7 @@ def cmd_edit(args):
             conf = parse_auto_ping(args.auto_ping)
         except ValueError as e:
             raise SystemExit(f"ctrack: {e}") from None
-        if conf and (not PROVIDERS[acc["type"]]["ping"] or acc.get("ping") is False):
+        if conf and (not provider(acc)["ping"] or acc.get("ping") is False):
             raise SystemExit(f"ctrack: {acc['id']} has no ping, so no auto ping")
         if conf:
             acc["auto_ping"] = conf
@@ -1254,7 +1263,7 @@ def find_account(cfg, account_id):
 
 
 def refresh_seconds(acc, cfg):
-    m = acc.get("refresh_minutes") or PROVIDERS[acc["type"]].get("refresh_minutes") \
+    m = acc.get("refresh_minutes") or provider(acc).get("refresh_minutes") \
         or cfg.get("refresh_minutes") or DEFAULT_REFRESH_MIN
     return max(1, float(m)) * 60
 
@@ -1263,7 +1272,7 @@ def fetch_into_state(acc, state):
     entry = state.get(acc["id"]) or {}
     entry["fetched_at"] = iso(utcnow())
     try:
-        data = PROVIDERS[acc["type"]]["fetch"](acc)
+        data = provider(acc)["fetch"](acc)
         partial = data.pop("_partial_error", None)
         entry.update(data=data, error=partial, hint=None, status="stale" if partial else "ok")
         if not partial:
@@ -1296,18 +1305,19 @@ def cli_command(acc):
 
 
 def build_account(acc, entry, now, sched=None):
-    prov = PROVIDERS[acc["type"]]
+    prov = provider(acc)
     data = entry.get("data") or {}
     status = entry.get("status") or "pending"
     if status in ("error", "setup") and data:
         status = "stale" if status == "error" else status
     return {
-        "id": acc["id"], "label": acc.get("label") or acc["id"], "type": acc["type"], "vendor": prov["vendor"],
+        "id": acc["id"], "label": acc.get("label") or acc["id"], "type": acc["type"],
+        "vendor": acc.get("vendor") or data.get("vendor") or prov["vendor"],
         "plan": acc.get("plan") or data.get("plan"), "identity": data.get("identity"),
         "status": status, "error": entry.get("error"), "hint": entry.get("hint"),
         "fetched_at": entry.get("fetched_at"), "ok_at": entry.get("ok_at"),
         "can_ping": bool(prov["ping"]) and acc.get("ping") is not False,
-        "can_login": acc["type"] != "command",
+        "can_login": bool(prov["login"]),
         "cli": cli_command(acc),
         "dashboard_url": acc.get("dashboard_url", f"https://{copilot_host(acc)}/settings/copilot"
                                  if acc["type"] == "copilot" else prov["dashboard"]),
@@ -1456,7 +1466,7 @@ def cmd_status(args):
 
 def cmd_ping(args):
     cfg = load_config()
-    accs = [a for a in cfg["accounts"] if enabled_here(a) and PROVIDERS[a["type"]]["ping"] and a.get("ping") is not False]
+    accs = [a for a in cfg["accounts"] if enabled_here(a) and provider(a)["ping"] and a.get("ping") is not False]
     if args.accounts:
         accs = [find_account(cfg, i) for i in args.accounts]
     elif args.idle:

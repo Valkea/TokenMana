@@ -35,7 +35,7 @@ button (GNOME), or the CLI:
 ctrack add claude  --label "Claude Max · work"     # → own config dir ~/.claude-max-work
 ctrack add codex   --label "Codex Pro · client"    # → own CODEX_HOME ~/.codex-pro-client
 ctrack add copilot --label "Copilot · company"     # GitHub device-code sign-in
-ctrack add command --label "Team budget" --command "my-usage --json"   # your own provider
+ctrack add command --label "Team budget" --command "my-usage --json"   # your own provider, see below
 ctrack login <id>        # sign in (the UIs do this for you after "Add & sign in")
 ctrack edit <id> --label "New name" [--group Work] [--host mycorp.ghe.com]
 ctrack remove <id>
@@ -56,7 +56,7 @@ along the left of its rows: pick it from the group header's submenu → *Color*,
 | `claude` (Pro/Max) | session 5 h, weekly (+ per-model weekly, extra-usage spend when enabled) | Claude Code OAuth login → `api.anthropic.com/api/oauth/usage` (same as `/usage`) |
 | `codex` (ChatGPT Plus/Pro/Business) | 5 h window, weekly, credits | Codex CLI login (`$CODEX_HOME/auth.json`) → `chatgpt.com/backend-api/wham/usage`; falls back to the last rate-limit snapshot in Codex session logs |
 | `copilot` | premium requests used / entitlement, monthly reset, overage | GitHub device flow → `api.github.com/copilot_internal/user` |
-| `command` | whatever your command reports (budgets, quotas, …) | any command printing CreditsTracker JSON (format: `fetch_command` in `core/ctrack.py`) |
+| `command` | whatever your command reports (budgets, quotas, …) | any command printing CreditsTracker JSON, see [Your own provider](#your-own-provider) |
 
 **Several subscriptions of the same vendor on one machine.** Each Claude/Codex account gets its own
 config dir, so logins don't overwrite each other. To use one from a terminal (account submenu →
@@ -117,6 +117,43 @@ The apps run `ctrack auto-ping` every minute while they are running. Without the
 `ctrack ping <id>` or `ctrack auto-ping --dismiss <id>`. The config is shared between machines, so every machine
 that runs the app auto-pings that account (a second ping in a running session only costs a few tokens).
 
+## Your own provider
+
+A `command` account runs any program and shows what it prints. Use it for a usage source CreditsTracker does not
+know: an internal budget API, a gateway, a billing export. The program can be written in any language. It runs
+from your home directory with no stdin, a 90 s timeout and the usual install dirs on `PATH`, every
+`refresh_minutes` (15 by default for this type).
+
+It prints one JSON object on stdout (log lines before it are ignored):
+
+```json
+{
+  "plan": "Team budget",
+  "identity": "me@example.com",
+  "vendor": "bedrock",
+  "metrics": [
+    { "key": "budget", "label": "Budget", "percent": 42.5, "text": "$425 / $1,000", "resets_at": "2026-12-01T00:00:00Z" },
+    { "key": "team", "label": "Team", "percent": 12, "text": "$1,200 / $10,000", "resets_at": "2026-12-01T00:00:00Z" }
+  ],
+  "notes": ["Spent today: $3.20"]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `metrics[].key` / `label` | id and display name of the gauge; `percent` (0–100) drives the bar and the menu-bar figure |
+| `metrics[].text` | text next to the bar (default: the percentage); `resets_at` (ISO time or epoch) shows a countdown |
+| `metrics[].window_seconds` / `idle` | optional: length of a rolling window; `idle: true` shows *idle* |
+| `plan`, `identity`, `notes` | optional: plan badge, account name, extra lines under the gauges |
+| `vendor` | optional badge: `anthropic`, `openai`, `github`, `bedrock` or `command` (default) |
+
+When it cannot get the data, it prints `{"error": "Credentials expired", "hint": "Run my-login first"}` (any exit
+code), or exits non-zero: the first line of stderr is then the error. An account's `login_hint`, if set, replaces the hint.
+Add `"setup": true` to an error that means "not set up on this device".
+
+Organisations can ship such commands, with an installer that runs this repo's `install.sh` and adds the
+accounts, in a separate internal repo. CreditsTracker itself then needs no changes for them.
+
 ## Config reference
 
 `~/.config/creditstracker/config.json` is the same file on both machines (sync it with chezmoi, for example):
@@ -142,6 +179,8 @@ that runs the app auto-pings that account (a second ping in a running session on
 | `refresh_minutes` | per account or global; the UIs poll every minute and the core only fetches what is due |
 | `auto_ping` | `{"mode": "interval"}` (every 5 h 1 min) or `{"mode": "times", "times": ["08:00", "13:01"]}`; see [Auto ping](#auto-ping) |
 | `config_dir` / `codex_home` | Claude / Codex config dir of the account |
+| `command` / `login_hint` | `command` accounts: what to run, and the hint shown when it fails |
+| `vendor` | badge of the account (`anthropic`, `openai`, `github`, `bedrock`, `command`) |
 | `dashboard_url` | override (or `null` to hide) the "open usage page" button |
 
 Files: secrets (Copilot tokens) live in `~/.config/creditstracker/secrets.json` (0600), the cache in

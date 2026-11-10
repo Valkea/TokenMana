@@ -9,7 +9,7 @@
     "48",
     "49"
   ],
-  "version-name": "0.1.0",
+  "version-name": "0.2.0",
   "url": "https://github.com/valkeanaa/CreditsTracker",
   "settings-schema": "org.gnome.shell.extensions.creditstracker"
 }

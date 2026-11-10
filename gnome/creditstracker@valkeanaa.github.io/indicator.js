@@ -564,7 +564,7 @@ const Indicator = GObject.registerClass({
             this._addForm = null;
             await this._refreshAccount(acc.id);
             const full = this._status?.accounts.find(a => a.id === acc.id);
-            if (f.type !== 'command' && full)
+            if (full?.can_login)
                 this._startLogin(full);
         } catch (e) {
             if (this._addForm) {

@@ -225,7 +225,7 @@ final class Store: ObservableObject {
                       let id = obj["id"] as? String else { throw CoreError.failed("unexpected output from ctrack add") }
                 addForm = nil
                 await refreshAccount(id)
-                if form.type != "command", let acc = status?.accounts.first(where: { $0.id == id }) {
+                if let acc = status?.accounts.first(where: { $0.id == id }), acc.canLogin {
                     startLogin(acc)
                 }
             } catch {
