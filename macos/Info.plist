@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.github.valkeanaa.creditstracker</string>
+    <string>io.github.valkea.tokenmana</string>
     <key>CFBundleName</key>
-    <string>CreditsTracker</string>
+    <string>TokenMana</string>
     <key>CFBundleDisplayName</key>
-    <string>CreditsTracker</string>
+    <string>TokenMana</string>
     <key>CFBundleExecutable</key>
-    <string>CreditsTracker</string>
+    <string>TokenMana</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

@@ -1,6 +1,6 @@
 {
-  "uuid": "creditstracker@valkeanaa.github.io",
-  "name": "CreditsTracker",
+  "uuid": "tokenmana@valkea.github.io",
+  "name": "TokenMana",
   "description": "Usage, limits, reset times and spend of your coding-assistant accounts (Claude, Codex, Copilot, or your own command) in the top bar, with one-click ping to start session timers.",
   "shell-version": [
     "45",
@@ -10,6 +10,6 @@
     "49"
   ],
   "version-name": "0.2.0",
-  "url": "https://github.com/valkeanaa/CreditsTracker",
-  "settings-schema": "org.gnome.shell.extensions.creditstracker"
+  "url": "https://github.com/Valkea/TokenMana",
+  "settings-schema": "org.gnome.shell.extensions.tokenmana"
 }

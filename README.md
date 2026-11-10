@@ -1,4 +1,4 @@
-# CreditsTracker
+# TokenMana
 
 One glance at every coding-assistant subscription: session (5 h) and weekly usage with reset
 countdowns, monthly premium-request quotas, and budget spend. One click **pings** an account
@@ -8,7 +8,7 @@ with its smallest model at low effort, which starts its 5 h session timer early.
 |---|---|---|
 | macOS 14+ | menu-bar app (native `NSMenu`) | `macos/` |
 | Ubuntu 24.04 (GNOME 45–49) | top-bar extension | `gnome/` |
-| both | `ctrack` CLI = the shared core both UIs call | `core/ctrack.py` |
+| both | `mana` CLI = the shared core both UIs call | `core/mana.py` |
 
 The core is a single dependency-free Python file (3.9+). Every provider integration lives there, so
 the two UIs stay thin and behave identically.
@@ -16,7 +16,7 @@ the two UIs stay thin and behave identically.
 ## Install
 
 ```sh
-./install.sh          # macOS: builds + installs ~/Applications/CreditsTracker.app
+./install.sh          # macOS: builds + installs ~/Applications/TokenMana.app
                       # Ubuntu: installs the GNOME extension (log out/in once, then enable)
 ```
 
@@ -32,13 +32,13 @@ Add as many accounts of each type as you like: **Add Account… (⌘N)** in the 
 button (GNOME), or the CLI:
 
 ```sh
-ctrack add claude  --label "Claude Max · work"     # → own config dir ~/.claude-max-work
-ctrack add codex   --label "Codex Pro · client"    # → own CODEX_HOME ~/.codex-pro-client
-ctrack add copilot --label "Copilot · company"     # GitHub device-code sign-in
-ctrack add command --label "Team budget" --command "my-usage --json"   # your own provider, see below
-ctrack login <id>        # sign in (the UIs do this for you after "Add & sign in")
-ctrack edit <id> --label "New name" [--group Work] [--host mycorp.ghe.com]
-ctrack remove <id>
+mana add claude  --label "Claude Max · work"     # → own config dir ~/.claude-max-work
+mana add codex   --label "Codex Pro · client"    # → own CODEX_HOME ~/.codex-pro-client
+mana add copilot --label "Copilot · company"     # GitHub device-code sign-in
+mana add command --label "Team budget" --command "my-usage --json"   # your own provider, see below
+mana login <id>        # sign in (the UIs do this for you after "Add & sign in")
+mana edit <id> --label "New name" [--group Work] [--host mycorp.ghe.com]
+mana remove <id>
 ```
 
 In the menus: an account's submenu → *Edit Account…* (macOS), or its ✎ button (GNOME), to rename it, change its
@@ -49,14 +49,14 @@ account's submenu → *Move to Group ▸*. The menu then shows one section per g
 ungrouped accounts under *Other*. Group names ignore case (`work` joins `Work`). To set the order of the sections,
 add `"groups": ["Work", "Personal"]` to the config; otherwise they are alphabetical. Each group has a colour bar
 along the left of its rows: pick it from the group header's submenu → *Color*, or with
-`ctrack group-color Work blue` (blue, green, purple, orange, pink, teal, red, gray).
+`mana group-color Work blue` (blue, green, purple, orange, pink, teal, red, gray).
 
 | Type | Shows | Data source |
 |---|---|---|
 | `claude` (Pro/Max) | session 5 h, weekly (+ per-model weekly, extra-usage spend when enabled) | Claude Code OAuth login → `api.anthropic.com/api/oauth/usage` (same as `/usage`) |
 | `codex` (ChatGPT Plus/Pro/Business) | 5 h window, weekly, credits | Codex CLI login (`$CODEX_HOME/auth.json`) → `chatgpt.com/backend-api/wham/usage`; falls back to the last rate-limit snapshot in Codex session logs |
 | `copilot` | premium requests used / entitlement, monthly reset, overage | GitHub device flow → `api.github.com/copilot_internal/user` |
-| `command` | whatever your command reports (budgets, quotas, …) | any command printing CreditsTracker JSON, see [Your own provider](#your-own-provider) |
+| `command` | whatever your command reports (budgets, quotas, …) | any command printing TokenMana JSON, see [Your own provider](#your-own-provider) |
 
 **Several subscriptions of the same vendor on one machine.** Each Claude/Codex account gets its own
 config dir, so logins don't overwrite each other. To use one from a terminal (account submenu →
@@ -79,7 +79,7 @@ device-code page just asks you to authorize. Changing the host signs the account
 
 ## Ping
 
-`ctrack ping <id>` / `--idle` / `--all`, or *Ping Now* / *Ping Idle Sessions* in the menu (▶ on GNOME). It sends one tiny prompt with tools, MCP
+`mana ping <id>` / `--idle` / `--all`, or *Ping Now* / *Ping Idle Sessions* in the menu (▶ on GNOME). It sends one tiny prompt with tools, MCP
 servers, hooks and session persistence disabled, from an empty temp dir:
 
 - Claude: `claude -p --model haiku --effort low …`
@@ -99,9 +99,9 @@ have no ping.
 Each Claude/Codex account can ping on its own (account submenu → *Auto Ping ▸* on macOS, ✎ on GNOME, or the CLI):
 
 ```sh
-ctrack edit claude-perso --auto-ping 5h                    # 5 h 1 min after each ping
-ctrack edit claude-work  --auto-ping "08:00,13:01,18:02"   # at these times (24 h, this computer's clock)
-ctrack edit claude-work  --auto-ping off
+mana edit claude-perso --auto-ping 5h                    # 5 h 1 min after each ping
+mana edit claude-work  --auto-ping "08:00,13:01,18:02"   # at these times (24 h, this computer's clock)
+mana edit claude-work  --auto-ping off
 ```
 
 - **Every 5h**: pings again 5 h 1 min after the last ping (manual or automatic), so a new session starts as soon as
@@ -112,14 +112,14 @@ ctrack edit claude-work  --auto-ping off
   to *Ping now* or *Wait for* the next time. Several missed times make one question. If a session is already running,
   there is nothing to start, so it does not ask. A failed ping asks the same question, with the error.
 
-The apps run `ctrack auto-ping` every minute while they are running. Without them (a server, say), use cron:
-`* * * * * ~/.local/bin/ctrack auto-ping`. Missed-time questions are then in `ctrack status`; answer with
-`ctrack ping <id>` or `ctrack auto-ping --dismiss <id>`. The config is shared between machines, so every machine
+The apps run `mana auto-ping` every minute while they are running. Without them (a server, say), use cron:
+`* * * * * ~/.local/bin/mana auto-ping`. Missed-time questions are then in `mana status`; answer with
+`mana ping <id>` or `mana auto-ping --dismiss <id>`. The config is shared between machines, so every machine
 that runs the app auto-pings that account (a second ping in a running session only costs a few tokens).
 
 ## Your own provider
 
-A `command` account runs any program and shows what it prints. Use it for a usage source CreditsTracker does not
+A `command` account runs any program and shows what it prints. Use it for a usage source TokenMana does not
 know: an internal budget API, a gateway, a billing export. The program can be written in any language. It runs
 from your home directory with no stdin, a 90 s timeout and the usual install dirs on `PATH`, every
 `refresh_minutes` (15 by default for this type).
@@ -152,11 +152,11 @@ code), or exits non-zero: the first line of stderr is then the error. An account
 Add `"setup": true` to an error that means "not set up on this device".
 
 Organisations can ship such commands, with an installer that runs this repo's `install.sh` and adds the
-accounts, in a separate internal repo. CreditsTracker itself then needs no changes for them.
+accounts, in a separate internal repo. TokenMana itself then needs no changes for them.
 
 ## Config reference
 
-`~/.config/creditstracker/config.json` is the same file on both machines (sync it with chezmoi, for example):
+`~/.config/tokenmana/config.json` is the same file on both machines (sync it with chezmoi, for example):
 
 ```json
 {
@@ -183,14 +183,14 @@ accounts, in a separate internal repo. CreditsTracker itself then needs no chang
 | `vendor` | badge of the account (`anthropic`, `openai`, `github`, `bedrock`, `command`) |
 | `dashboard_url` | override (or `null` to hide) the "open usage page" button |
 
-Files: secrets (Copilot tokens) live in `~/.config/creditstracker/secrets.json` (0600), the cache in
-`~/.cache/creditstracker/state.json`, auto-ping state (last ping, pending questions) in `~/.cache/creditstracker/autoping.json`. Claude/Codex tokens are read where those CLIs keep them (the
+Files: secrets (Copilot tokens) live in `~/.config/tokenmana/secrets.json` (0600), the cache in
+`~/.cache/tokenmana/state.json`, auto-ping state (last ping, pending questions) in `~/.cache/tokenmana/autoping.json`. Claude/Codex tokens are read where those CLIs keep them (the
 macOS Keychain or `~/.claude/.credentials.json`, and `auth.json`), only to call the usage endpoints.
 They are never written to the cache or printed.
 
 ## Notes
 
 - The Claude, Codex and Copilot usage endpoints are the ones their own clients use. They are not
-  public APIs and may change; if a provider breaks, the fix goes in one function in `core/ctrack.py`.
+  public APIs and may change; if a provider breaks, the fix goes in one function in `core/mana.py`.
 - When a login token has expired, the card keeps the last data (marked ⚠). Windows whose reset time
   has passed drop to 0 / *idle*. Using the tool once, or pinging it, refreshes the token.

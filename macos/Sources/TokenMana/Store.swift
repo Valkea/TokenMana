@@ -71,7 +71,7 @@ final class Store: ObservableObject {
         Set((status?.accounts ?? []).compactMap { a in a.autoPing?.missed.map { "\(a.id)@\($0)" } })
     }
 
-    /// `ctrack status` → `status`. `poll` loads are skipped while another load is in flight.
+    /// `mana status` → `status`. `poll` loads are skipped while another load is in flight.
     func load(_ extra: [String], poll: Bool = false) async {
         if poll && loading { return }
         loading = true
@@ -222,7 +222,7 @@ final class Store: ObservableObject {
             do {
                 let data = try await Core.run(args)
                 guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let id = obj["id"] as? String else { throw CoreError.failed("unexpected output from ctrack add") }
+                      let id = obj["id"] as? String else { throw CoreError.failed("unexpected output from mana add") }
                 addForm = nil
                 await refreshAccount(id)
                 if let acc = status?.accounts.first(where: { $0.id == id }), acc.canLogin {

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""ctrack — CreditsTracker core.
+"""mana — TokenMana core.
 
 Fetches usage / limits / spend for several coding-assistant accounts and prints
 them in one normalized JSON shape consumed by the macOS menu-bar app and the
 GNOME Shell extension. Stdlib only, Python >= 3.9, macOS + Linux.
 
-  ctrack status [--json] [--force] [--cached] [ACCOUNT_ID ...]
-  ctrack ping   [--json] (--all | --idle | ACCOUNT_ID ...)
-  ctrack auto-ping [--json] [--dismiss ACCOUNT_ID]   run the scheduled pings that are due
-  ctrack login  [--json] ACCOUNT_ID
-  ctrack add    TYPE [--label L] [--dir D] [--host H] [--command C]   (claude|codex|copilot|command)
-  ctrack edit   ACCOUNT_ID [--label L] [--group G] [--host H] [--auto-ping off|5h|HH:MM,...]
-  ctrack remove ACCOUNT_ID
-  ctrack init   [--force]          write a starter config (auto-detected)
-  ctrack paths                     print config / cache locations
+  mana status [--json] [--force] [--cached] [ACCOUNT_ID ...]
+  mana ping   [--json] (--all | --idle | ACCOUNT_ID ...)
+  mana auto-ping [--json] [--dismiss ACCOUNT_ID]   run the scheduled pings that are due
+  mana login  [--json] ACCOUNT_ID
+  mana add    TYPE [--label L] [--dir D] [--host H] [--command C]   (claude|codex|copilot|command)
+  mana edit   ACCOUNT_ID [--label L] [--group G] [--host H] [--auto-ping off|5h|HH:MM,...]
+  mana remove ACCOUNT_ID
+  mana init   [--force]          write a starter config (auto-detected)
+  mana paths                     print config / cache locations
 
 Secrets (OAuth tokens) are read from where each tool already stores them and are
 never printed or written to the cache.
@@ -45,12 +45,12 @@ VERSION = "0.2.0"
 IS_MAC = sys.platform == "darwin"
 HOME = os.path.expanduser("~")
 
-CONFIG_DIR = os.environ.get("CTRACK_CONFIG_DIR") or os.path.join(
-    os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "creditstracker")
+CONFIG_DIR = os.environ.get("TOKENMANA_CONFIG_DIR") or os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "tokenmana")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 SECRETS_PATH = os.path.join(CONFIG_DIR, "secrets.json")
-CACHE_DIR = os.environ.get("CTRACK_CACHE_DIR") or os.path.join(
-    os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "creditstracker")
+CACHE_DIR = os.environ.get("TOKENMANA_CACHE_DIR") or os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "tokenmana")
 STATE_PATH = os.path.join(CACHE_DIR, "state.json")
 SCHEDULE_PATH = os.path.join(CACHE_DIR, "autoping.json")
 
@@ -181,7 +181,7 @@ def tool_env(**overrides):
 
 def http_json(url, headers=None, data=None, timeout=20, form=False):
     body = None
-    hdrs = {"Accept": "application/json", "User-Agent": f"creditstracker/{VERSION}"}
+    hdrs = {"Accept": "application/json", "User-Agent": f"tokenmana/{VERSION}"}
     hdrs.update(headers or {})
     if data is not None:
         if form:
@@ -357,7 +357,7 @@ def claude_credentials(acc):
         except OSError:
             raw = None
     if not raw:
-        raise ProviderError("Not signed in on this device", hint=f"ctrack login {acc['id']}", setup=True)
+        raise ProviderError("Not signed in on this device", hint=f"mana login {acc['id']}", setup=True)
     try:
         return json.loads(raw).get("claudeAiOauth") or {}
     except ValueError:
@@ -392,7 +392,7 @@ def fetch_claude(acc):
     try:
         d = http_json("https://api.anthropic.com/api/oauth/usage", headers={
             "Authorization": f"Bearer {access}", "anthropic-beta": CLAUDE_BETA,
-            "User-Agent": "claude-code/2.1 creditstracker"})
+            "User-Agent": "claude-code/2.1 tokenmana"})
     except ApiError as e:
         if e.status in (401, 403):
             raise ProviderError("Token rejected (401)", hint="Use Claude Code once to refresh its login") from None
@@ -442,7 +442,7 @@ def fetch_claude(acc):
     return {"plan": plan, "identity": claude_identity(acc), "metrics": metrics, "notes": notes}
 
 
-# -- Any command printing CreditsTracker JSON (your own provider) ------------
+# -- Any command printing TokenMana JSON (your own provider) -----------------
 #
 # The account's "command" prints one JSON object on stdout (lines before it are ignored):
 #   {"plan": "Team budget", "identity": "me@example.com", "vendor": "bedrock",
@@ -537,7 +537,7 @@ def fetch_codex(acc):
     home = codex_home(acc)
     auth = read_json(os.path.join(home, "auth.json"))
     if not auth:
-        raise ProviderError("Not signed in on this device", hint=f"ctrack login {acc['id']}", setup=True)
+        raise ProviderError("Not signed in on this device", hint=f"mana login {acc['id']}", setup=True)
     tokens = auth.get("tokens") or {}
     access = tokens.get("access_token")
     claims = jwt_claims(tokens.get("id_token") or "")
@@ -549,7 +549,7 @@ def fetch_codex(acc):
         raise ProviderError("Signed in with an API key — no plan limits", setup=True)
 
     base = (acc.get("chatgpt_base_url") or "https://chatgpt.com/backend-api").rstrip("/")
-    headers = {"Authorization": f"Bearer {access}", "User-Agent": "codex_cli_rs/0.50 creditstracker",
+    headers = {"Authorization": f"Bearer {access}", "User-Agent": "codex_cli_rs/0.50 tokenmana",
                "originator": "codex_cli_rs"}
     if account_id:
         headers["ChatGPT-Account-Id"] = account_id
@@ -563,7 +563,7 @@ def fetch_codex(acc):
             return {"plan": (plan or "").title() or None, "identity": identity, "metrics": metrics,
                     "notes": [f"From Codex session log of {at.astimezone().strftime('%d %b %H:%M')}"],
                     "_partial_error": msg}
-        raise ProviderError(msg, hint=f"Run codex once to refresh, or ctrack login {acc['id']}" if expired else None) from None
+        raise ProviderError(msg, hint=f"Run codex once to refresh, or mana login {acc['id']}" if expired else None) from None
 
     metrics = []
     rl = d.get("rate_limit") or {}
@@ -629,7 +629,7 @@ def copilot_token(acc):
                 if key.startswith(copilot_host(acc)) and isinstance(val, dict) and val.get("user") == user:
                     if val.get("oauth_token"):
                         return val["oauth_token"]
-    raise ProviderError("Not signed in on this device", hint=f"ctrack login {acc['id']}", setup=True)
+    raise ProviderError("Not signed in on this device", hint=f"mana login {acc['id']}", setup=True)
 
 
 def copilot_api(acc):
@@ -650,7 +650,7 @@ def fetch_copilot(acc):
     except ApiError as e:
         if e.status in (401, 403, 404):
             raise ProviderError(f"GitHub refused the token ({e.status})",
-                                hint=f"ctrack login {acc['id']}") from None
+                                hint=f"mana login {acc['id']}") from None
         raise ProviderError(str(e)) from None
     reset = d.get("quota_reset_date_utc") or d.get("quota_reset_date") or d.get("limited_user_reset_date")
     metrics, notes = [], []
@@ -703,7 +703,7 @@ PROVIDERS = {
 
 def fetch_unknown(acc):
     raise ProviderError(f"Unknown account type {acc.get('type')!r}",
-                        hint="Update CreditsTracker, or remove this account", setup=True)
+                        hint="Update TokenMana, or remove this account", setup=True)
 
 
 UNKNOWN_PROVIDER = {"fetch": fetch_unknown, "vendor": "unknown", "ping": False, "login": False, "dashboard": None}
@@ -750,7 +750,7 @@ def ping_account(acc):
         argv, env = ping_command(acc)
     except ProviderError as e:
         return {"id": acc["id"], "ok": False, "error": str(e), "seconds": 0}
-    with tempfile.TemporaryDirectory(prefix="ctrack-ping-") as cwd:
+    with tempfile.TemporaryDirectory(prefix="mana-ping-") as cwd:
         try:
             p = subprocess.run(argv, capture_output=True, text=True, timeout=180, env=env, cwd=cwd,
                                stdin=subprocess.DEVNULL)
@@ -767,10 +767,10 @@ def ping_account(acc):
 
 # ───────────────────────────── auto ping ────────────────────────────────────
 #
-# Per account in config.json (`ctrack edit ID --auto-ping 5h|08:00,13:01|off`):
+# Per account in config.json (`mana edit ID --auto-ping 5h|08:00,13:01|off`):
 #   "auto_ping": {"mode": "interval"}                            5 h 1 min after the last ping
 #   "auto_ping": {"mode": "times", "times": ["08:00", "13:01"]}  at these local times
-# The UIs run `ctrack auto-ping` every minute (cron works too). A scheduled time the device was
+# The UIs run `mana auto-ping` every minute (cron works too). A scheduled time the device was
 # asleep or off for is not caught up on its own: it becomes a question, "ping now, or wait for the
 # next time?". Run state (last ping, handled times, pending question) is kept in autoping.json.
 
@@ -1085,7 +1085,7 @@ def load_config():
     cfg = read_json(CONFIG_PATH)
     if cfg is None:
         if os.path.exists(CONFIG_PATH):
-            raise SystemExit(f"ctrack: {CONFIG_PATH} is not valid JSON")
+            raise SystemExit(f"mana: {CONFIG_PATH} is not valid JSON")
         cfg = {"refresh_minutes": DEFAULT_REFRESH_MIN, "menubar": "max", "accounts": autodetect_accounts()}
         write_json(CONFIG_PATH, cfg)
     cfg.setdefault("accounts", [])
@@ -1135,7 +1135,7 @@ def cmd_add(args):
         acc["host"] = normalize_host(args.host)
     if t == "command":
         if not (args.command or "").strip():
-            raise SystemExit("ctrack add command: --command is required")
+            raise SystemExit("mana add command: --command is required")
         acc["command"] = args.command.strip()
     if args.group and args.group.strip():
         acc["group"] = canonical_group(cfg, args.group)
@@ -1146,7 +1146,7 @@ def cmd_add(args):
     if args.json:
         print(json.dumps(acc))
     else:
-        print(f"added {acc_id}" + (f" — sign in with: ctrack login {acc_id}" if PROVIDERS[t]["login"] else ""))
+        print(f"added {acc_id}" + (f" — sign in with: mana login {acc_id}" if PROVIDERS[t]["login"] else ""))
     return 0
 
 
@@ -1179,9 +1179,9 @@ def cmd_edit(args):
         try:
             conf = parse_auto_ping(args.auto_ping)
         except ValueError as e:
-            raise SystemExit(f"ctrack: {e}") from None
+            raise SystemExit(f"mana: {e}") from None
         if conf and (not provider(acc)["ping"] or acc.get("ping") is False):
-            raise SystemExit(f"ctrack: {acc['id']} has no ping, so no auto ping")
+            raise SystemExit(f"mana: {acc['id']} has no ping, so no auto ping")
         if conf:
             acc["auto_ping"] = conf
         else:
@@ -1259,7 +1259,7 @@ def find_account(cfg, account_id):
     for a in cfg["accounts"]:
         if a.get("id") == account_id:
             return a
-    raise SystemExit(f"ctrack: no account {account_id!r} in {CONFIG_PATH}")
+    raise SystemExit(f"mana: no account {account_id!r} in {CONFIG_PATH}")
 
 
 def refresh_seconds(acc, cfg):
@@ -1446,7 +1446,7 @@ def print_human(result):
             print(f"  {c('2', '⏱ ' + line)}")
             if ap.get("missed"):
                 print(f"  {c('33', '? ' + hm(ap['missed']) + ' ping ' + ('failed' if ap.get('error') else 'missed'))}"
-                      + f"  {c('2', '→ ctrack ping ' + a['id'] + '  |  ctrack auto-ping --dismiss ' + a['id'])}")
+                      + f"  {c('2', '→ mana ping ' + a['id'] + '  |  mana auto-ping --dismiss ' + a['id'])}")
             elif ap.get("error"):
                 print(f"  {c('31', '! Auto ping failed: ' + ap['error'])}")
         if a.get("error"):
@@ -1475,7 +1475,7 @@ def cmd_ping(args):
                     if a["status"] in ("ok", "stale") and any(m["key"] == "session" and m["idle"] for m in a["metrics"])}
         accs = [a for a in accs if a["id"] in idle_ids]
     elif not args.all:
-        raise SystemExit("ctrack ping: give account ids, --all or --idle")
+        raise SystemExit("mana ping: give account ids, --all or --idle")
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(ping_account, accs))
     record_pings(results)
@@ -1518,7 +1518,7 @@ def cmd_auto_ping(args):
         when = parse_time(m["slot"]).astimezone().strftime("%H:%M")
         nxt = f", next at {parse_time(m['next']).astimezone().strftime('%H:%M')}" if m.get("next") else ""
         print(f"{m['id']}: {when} ping " + (f"failed ({m['error']})" if m.get("error") else "missed")
-              + f"{nxt} — `ctrack ping {m['id']}` now, or `ctrack auto-ping --dismiss {m['id']}` to wait")
+              + f"{nxt} — `mana ping {m['id']}` now, or `mana auto-ping --dismiss {m['id']}` to wait")
     if not res["pinged"] and not res["missed"]:
         print("nothing due")
     return 0
@@ -1541,7 +1541,7 @@ def cmd_paths(_args):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="ctrack", description="Coding-assistant credits & limits tracker")
+    ap = argparse.ArgumentParser(prog="mana", description="Coding-assistant credits & limits tracker")
     ap.add_argument("--version", action="version", version=VERSION)
     sub = ap.add_subparsers(dest="cmd")
     s = sub.add_parser("status", help="show usage for all accounts")

@@ -11,24 +11,24 @@ enum CoreError: LocalizedError {
     }
 }
 
-/// Runs the shared Python core (`ctrack.py`, bundled in the app's Resources).
+/// Runs the shared Python core (`mana.py`, bundled in the app's Resources).
 enum Core {
     static let script: String? = {
-        if let p = ProcessInfo.processInfo.environment["CTRACK_PATH"], FileManager.default.fileExists(atPath: p) {
+        if let p = ProcessInfo.processInfo.environment["TOKENMANA_CORE"], FileManager.default.fileExists(atPath: p) {
             return p
         }
-        return Bundle.main.url(forResource: "ctrack", withExtension: "py")?.path
+        return Bundle.main.url(forResource: "mana", withExtension: "py")?.path
     }()
 
     static let python: String? = {
-        let candidates = [ProcessInfo.processInfo.environment["CTRACK_PYTHON"],
+        let candidates = [ProcessInfo.processInfo.environment["TOKENMANA_PYTHON"],
                           "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
         return candidates.compactMap { $0 }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }()
 
     static func makeProcess(_ args: [String]) throws -> Process {
         guard let python else { throw CoreError.missing("python3 not found (install Xcode CLT or Homebrew python)") }
-        guard let script else { throw CoreError.missing("ctrack.py not found in the app bundle") }
+        guard let script else { throw CoreError.missing("mana.py not found in the app bundle") }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: python)
         p.arguments = ["-I", script] + args
@@ -36,7 +36,7 @@ enum Core {
         return p
     }
 
-    /// Runs `ctrack <args>` and returns stdout. Fails only if the process wrote nothing to stdout.
+    /// Runs `mana <args>` and returns stdout. Fails only if the process wrote nothing to stdout.
     static func run(_ args: [String]) async throws -> Data {
         let p = try makeProcess(args)
         let out = Pipe(), err = Pipe()
@@ -60,7 +60,7 @@ enum Core {
                     cont.resume(returning: outData)
                 } else {
                     let msg = String(decoding: errBox.data, as: UTF8.self)
-                        .split(separator: "\n").last.map(String.init) ?? "ctrack exited with \(p.terminationStatus)"
+                        .split(separator: "\n").last.map(String.init) ?? "mana exited with \(p.terminationStatus)"
                     cont.resume(throwing: CoreError.failed(msg))
                 }
             }
@@ -72,7 +72,7 @@ final class DataBox: @unchecked Sendable {
     var data = Data()
 }
 
-/// A running `ctrack login <id> --json`, streaming one JSON event per line.
+/// A running `mana login <id> --json`, streaming one JSON event per line.
 final class LoginSession: @unchecked Sendable {
     private let process: Process
     private let buffer = DataBox()

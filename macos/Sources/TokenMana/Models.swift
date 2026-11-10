@@ -1,6 +1,6 @@
 import Foundation
 
-/// Mirrors the JSON printed by `ctrack status --json`.
+/// Mirrors the JSON printed by `mana status --json`.
 struct StatusResult: Decodable {
     let generatedAt: String
     let refreshMinutes: Double?
@@ -50,7 +50,7 @@ struct Account: Decodable, Identifiable {
     var hasIdleSession: Bool { metrics.contains { $0.key == "session" && $0.idle } }
 }
 
-/// Scheduled pings of an account: every 5 h, or at set times (`ctrack edit --auto-ping`).
+/// Scheduled pings of an account: every 5 h, or at set times (`mana edit --auto-ping`).
 struct AutoPing: Decodable {
     let mode: String            // interval | times
     let times: [String]         // "08:00", local clock
@@ -64,7 +64,7 @@ struct AutoPing: Decodable {
     var missedDate: Date? { missed.flatMap(parseISO) }
 }
 
-/// `ctrack auto-ping --json`
+/// `mana auto-ping --json`
 struct AutoPingResult: Decodable {
     struct Missed: Decodable {
         let id: String

@@ -72,7 +72,7 @@ private struct AddStep: View {
         "claude": "Gets its own Claude Code config dir (~/.claude-<name>), so several subscriptions coexist. Sign-in opens your browser.",
         "codex": "Gets its own CODEX_HOME (~/.codex-<name>). Requires the codex CLI. Sign-in opens your browser.",
         "copilot": "Signs in with a GitHub device code, using the account that holds the Copilot seat. For GitHub Enterprise with data residency, enter its host (e.g. mycorp.ghe.com) and sign in there first.",
-        "command": "Any command printing its usage as CreditsTracker JSON (see the README, “Your own provider”).",
+        "command": "Any command printing its usage as TokenMana JSON (see the README, “Your own provider”).",
     ]
 
     private func binding<T>(_ key: WritableKeyPath<AddForm, T>, _ fallback: T) -> Binding<T> {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.creditstracker" path="/org/gnome/shell/extensions/creditstracker/">
+  <schema id="org.gnome.shell.extensions.tokenmana" path="/org/gnome/shell/extensions/tokenmana/">
     <key name="show-percent" type="b">
       <default>true</default>
       <summary>Show percentage in the top bar</summary>

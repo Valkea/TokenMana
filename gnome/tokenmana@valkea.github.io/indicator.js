@@ -1,5 +1,5 @@
-// CreditsTracker — GNOME Shell top-bar indicator (GNOME 45+ / Ubuntu 24.04).
-// All data comes from the shared core: `python3 ctrack.py status --json`.
+// TokenMana — GNOME Shell top-bar indicator (GNOME 45+ / Ubuntu 24.04).
+// All data comes from the shared core: `python3 mana.py status --json`.
 // Loaded by extension.js from a fresh copy on every enable, so updates apply without logging out.
 
 import GObject from 'gi://GObject';
@@ -23,7 +23,7 @@ const ACCOUNT_TYPES = [
     ['claude', 'Claude', 'Own Claude Code config dir (~/.claude-<name>); sign-in opens the browser.'],
     ['codex', 'Codex', 'Own CODEX_HOME (~/.codex-<name>); needs the codex CLI; sign-in opens the browser.'],
     ['copilot', 'Copilot', 'GitHub device code — use the account holding the Copilot seat. For GitHub Enterprise with data residency, set its host (e.g. mycorp.ghe.com).'],
-    ['command', 'Command', 'Any command printing its usage as CreditsTracker JSON (README → Your own provider).'],
+    ['command', 'Command', 'Any command printing its usage as TokenMana JSON (README → Your own provider).'],
 ];
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ function openUri(uri) {
     try {
         Gio.AppInfo.launch_default_for_uri(uri, global.create_app_launch_context(0, -1));
     } catch (e) {
-        logError(e, 'CreditsTracker: cannot open uri');
+        logError(e, 'TokenMana: cannot open uri');
     }
 }
 
@@ -125,7 +125,7 @@ function autoPingText(ap, now) {
     return text;
 }
 
-// The value `ctrack edit --auto-ping` takes for an edit form's choice.
+// The value `mana edit --auto-ping` takes for an edit form's choice.
 function autoPingArg(mode, times) {
     if (mode === 'interval')
         return '5h';
@@ -169,7 +169,7 @@ function runInTerminal(command) {
         launcher.spawnv([term, ...prefix, shell, '-i', '-c', `${command}; exec "${shell}" -i`]);
         return true;
     } catch (e) {
-        logError(e, 'CreditsTracker: cannot open a terminal');
+        logError(e, 'TokenMana: cannot open a terminal');
         return false;
     }
 }
@@ -179,8 +179,8 @@ function runInTerminal(command) {
 class Core {
     constructor(extPath) {
         const candidates = [
-            GLib.build_filenamev([extPath, 'ctrack.py']),
-            GLib.build_filenamev([GLib.get_user_data_dir(), 'creditstracker', 'ctrack.py']),
+            GLib.build_filenamev([extPath, 'mana.py']),
+            GLib.build_filenamev([GLib.get_user_data_dir(), 'tokenmana', 'mana.py']),
         ];
         this.script = candidates.find(p => GLib.file_test(p, GLib.FileTest.EXISTS)) ?? candidates[0];
         this.python = GLib.find_program_in_path('python3') ?? '/usr/bin/python3';
@@ -207,7 +207,7 @@ class Core {
                     if (stdout && stdout.trim())
                         resolve(stdout);
                     else
-                        reject(new Error((stderr || '').trim().split('\n').pop() || 'ctrack failed'));
+                        reject(new Error((stderr || '').trim().split('\n').pop() || 'mana failed'));
                 } catch (e) {
                     reject(e);
                 }
@@ -219,7 +219,7 @@ class Core {
         return JSON.parse(await this.run(args));
     }
 
-    // Streams `ctrack login <id> --json` events (one JSON object per line).
+    // Streams `mana login <id> --json` events (one JSON object per line).
     login(id, onEvent, onExit) {
         const proc = Gio.Subprocess.new(this.argv(['login', id, '--json']),
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE);
@@ -261,10 +261,10 @@ class Core {
 
 // Each loaded copy registers its own GType: the shell keeps every type for the session.
 const Indicator = GObject.registerClass({
-    GTypeName: `CreditsTrackerIndicator_${GLib.uuid_string_random().replaceAll('-', '')}`,
-}, class CreditsTrackerIndicator extends PanelMenu.Button {
+    GTypeName: `TokenManaIndicator_${GLib.uuid_string_random().replaceAll('-', '')}`,
+}, class TokenManaIndicator extends PanelMenu.Button {
     _init(ext) {
-        super._init(0.5, 'CreditsTracker');
+        super._init(0.5, 'TokenMana');
         this._core = new Core(ext.path);
         this._settings = ext.getSettings();
         this._status = null;
@@ -410,7 +410,7 @@ const Indicator = GObject.registerClass({
                 await this._load(['--cached']);
         } catch (e) {
             if (!this._destroyed)
-                logError(e, 'CreditsTracker: auto ping');
+                logError(e, 'TokenMana: auto ping');
         } finally {
             this._autoPinging = false;
         }
@@ -446,8 +446,8 @@ const Indicator = GObject.registerClass({
             try {
                 if (!this._notifSource) {
                     this._notifSource = typeof MessageTray.Source.prototype.addNotification === 'function'
-                        ? new MessageTray.Source({title: 'CreditsTracker', iconName: 'alarm-symbolic'})
-                        : new MessageTray.Source('CreditsTracker', 'alarm-symbolic');
+                        ? new MessageTray.Source({title: 'TokenMana', iconName: 'alarm-symbolic'})
+                        : new MessageTray.Source('TokenMana', 'alarm-symbolic');
                     this._notifSource.connect('destroy', () => {
                         this._notifSource = null;
                     });
@@ -463,7 +463,7 @@ const Indicator = GObject.registerClass({
                         this._missedNotifs.delete(id);
                 });
             } catch (e) {
-                logError(e, 'CreditsTracker: notification');
+                logError(e, 'TokenMana: notification');
                 Main.notify(acc.label, question);
             }
         }
@@ -947,7 +947,7 @@ const Indicator = GObject.registerClass({
                 this.menu.close();
                 if (!runInTerminal(acc.cli)) {
                     copyText(acc.cli);
-                    Main.notify('CreditsTracker', `No terminal found. Copied to clipboard: ${acc.cli}`);
+                    Main.notify('TokenMana', `No terminal found. Copied to clipboard: ${acc.cli}`);
                 }
             }));
         if (acc.dashboard_url)
@@ -1066,7 +1066,7 @@ const Indicator = GObject.registerClass({
         sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         sub.menu.addAction('Edit config file', () => {
             const path = this._status?.config_path ??
-                GLib.build_filenamev([GLib.get_user_config_dir(), 'creditstracker', 'config.json']);
+                GLib.build_filenamev([GLib.get_user_config_dir(), 'tokenmana', 'config.json']);
             openUri(GLib.filename_to_uri(path, null));
         });
         this.menu.addMenuItem(sub);

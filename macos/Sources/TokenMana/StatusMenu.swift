@@ -193,7 +193,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        menu.addItem(action("Quit CreditsTracker", #selector(quit), key: "q"))
+        menu.addItem(action("Quit TokenMana", #selector(quit), key: "q"))
     }
 
     private func setHeaderSubtitle(_ item: NSMenuItem) {
@@ -678,7 +678,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         alert.messageText = "Remove “\(acc.label)”?"
         alert.informativeText = acc.type == "copilot"
             ? "Its stored GitHub token is deleted. You can add it again later."
-            : "It is removed from CreditsTracker only. Its sign-in and config dir stay on this Mac."
+            : "It is removed from TokenMana only. Its sign-in and config dir stay on this Mac."
         alert.addButton(withTitle: "Remove").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { store.removeAccount(acc.id) }

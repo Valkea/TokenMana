@@ -1,4 +1,4 @@
-// CreditsTracker — GNOME Shell top-bar extension (GNOME 45+ / Ubuntu 24.04).
+// TokenMana — GNOME Shell top-bar extension (GNOME 45+ / Ubuntu 24.04).
 //
 // Hot-reload loader. On Wayland the shell caches an extension's modules for the whole session,
 // so a plain disable/enable would re-run old code. Instead, every enable() imports a fresh copy
@@ -11,7 +11,7 @@ import Gio from 'gi://Gio';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-export default class CreditsTrackerExtension extends Extension {
+export default class TokenManaExtension extends Extension {
     enable() {
         const gen = this._gen = (this._gen ?? 0) + 1;
         this._loadIndicator().then(mod => {
@@ -19,7 +19,7 @@ export default class CreditsTrackerExtension extends Extension {
                 return;
             this._indicator = mod.createIndicator(this);
             Main.panel.addToStatusArea(this.uuid, this._indicator);
-        }).catch(e => logError(e, 'CreditsTracker: cannot load indicator.js'));
+        }).catch(e => logError(e, 'TokenMana: cannot load indicator.js'));
     }
 
     disable() {
@@ -29,7 +29,7 @@ export default class CreditsTrackerExtension extends Extension {
     }
 
     async _loadIndicator() {
-        const dir = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_runtime_dir(), 'creditstracker']));
+        const dir = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_runtime_dir(), 'tokenmana']));
         GLib.mkdir_with_parents(dir.get_path(), 0o700);
         // Copies of earlier loads are no longer needed once imported.
         const it = dir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);

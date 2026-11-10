@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "CreditsTracker",
+    name: "TokenMana",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "CreditsTracker", path: "Sources/CreditsTracker")
+        .executableTarget(name: "TokenMana", path: "Sources/TokenMana")
     ]
 )
