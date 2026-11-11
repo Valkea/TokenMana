@@ -15,12 +15,21 @@ the two UIs stay thin and behave identically.
 
 ## Install
 
+No need to clone the repo: this downloads the latest release, installs it, and deletes the download.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Valkea/TokenMana/main/install.sh | bash    # macOS
+wget -qO- https://raw.githubusercontent.com/Valkea/TokenMana/main/install.sh | bash     # Ubuntu
+```
+
+Run it again to update. `… | TOKENMANA_VERSION=v0.2.0 bash` installs a given version. From a clone:
+
 ```sh
 ./install.sh          # macOS: builds + installs ~/Applications/TokenMana.app
                       # Ubuntu: installs the GNOME extension (log out/in once, then enable)
 ```
 
-On Ubuntu, re-running `./install.sh` after an update reloads the running extension in place, with no log out:
+On Ubuntu, re-running the installer after an update reloads the running extension in place, with no log out:
 `extension.js` is a small loader that imports a fresh copy of `indicator.js` (the whole UI) on each enable.
 Only changes to `extension.js`, `metadata.json` or the settings schema need a log out/in.
 
