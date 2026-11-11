@@ -1,8 +1,53 @@
+<div align="center">
+
 # TokenMana
+
+**How much mana is left in each of your coding assistants, from the menu bar.**
+
+[![Release](https://img.shields.io/github/v/tag/Valkea/TokenMana?sort=semver&label=release&color=7c3aed)](https://github.com/Valkea/TokenMana/tags)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/Valkea/TokenMana)](https://github.com/Valkea/TokenMana/commits/main)
+<br>
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#install)
+[![Ubuntu 24.04 · GNOME 45–49](https://img.shields.io/badge/Ubuntu%2024.04-GNOME%2045%E2%80%9349-E95420?logo=ubuntu&logoColor=white)](#install)
+[![Python 3.9+](https://img.shields.io/badge/core-Python%203.9%2B-3776AB?logo=python&logoColor=white)](core/mana.py)
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](core/mana.py)
+<br>
+[![Claude](https://img.shields.io/badge/Claude-Pro%20%C2%B7%20Max-D97757?logo=anthropic&logoColor=white)](#accounts)
+[![Codex](https://img.shields.io/badge/Codex-Plus%20%C2%B7%20Pro%20%C2%B7%20Business-412991)](#accounts)
+[![GitHub Copilot](https://img.shields.io/badge/Copilot-premium%20requests-24292F?logo=githubcopilot&logoColor=white)](#accounts)
+[![Your own](https://img.shields.io/badge/%2B%20your%20own-any%20command-gray?logo=gnubash&logoColor=white)](#your-own-provider)
+
+[Install](#install) · [Accounts](#accounts) · [Ping](#ping) · [Your own provider](#your-own-provider) · [Settings & backup](#settings-and-backup) · [Config reference](#config-reference)
+
+</div>
 
 One glance at every coding-assistant subscription: session (5 h) and weekly usage with reset
 countdowns, monthly premium-request quotas, and budget spend. One click **pings** an account
 with its smallest model at low effort, which starts its 5 h session timer early.
+
+- 📊 **All your quotas in one menu**: Claude, Codex, Copilot, and any source you can script.
+- 👥 **Several accounts per vendor** (perso, work, client…), each with its own login, sorted into coloured groups.
+- ⚡ **Ping and auto ping**: start a 5 h session early, every 5 h or at the times you choose.
+- 🖥️ **Native on both desktops**: a macOS menu-bar app and a GNOME top-bar extension, sharing one core.
+- 🔒 **Local and dependency-free**: one Python file, no telemetry; your logins are read only to call the usage endpoints.
+
+```text
+$ mana status
+PERSONAL
+Claude Pro · perso  Pro · me@example.com
+  Session · 5h               ███░░░░░░░              30%  resets in 2h 40m
+  Weekly                     █░░░░░░░░░               8%  resets in 5d 1h
+  ⏱ Auto ping every 5h · next 04:13
+
+Codex Plus · perso  Plus · me@example.com
+  Session · 5h               ░░░░░░░░░░               0%  resets in 4h 57m
+  Weekly                     █░░░░░░░░░              12%  resets in 5d 7h
+
+WORK
+Copilot · company  Business · me-work
+  Premium requests           █████░░░░░        142 / 300  resets in 19d 23h
+```
 
 | Platform | UI | Where |
 |---|---|---|
@@ -163,9 +208,40 @@ Add `"setup": true` to an error that means "not set up on this device".
 Organisations can ship such commands, with an installer that runs this repo's `install.sh` and adds the
 accounts, in a separate internal repo. TokenMana itself then needs no changes for them.
 
+## Settings and backup
+
+Everything TokenMana knows is in two hidden folders of your home directory (same paths on macOS and Linux;
+`mana paths` prints them):
+
+| File | Holds | Back it up? |
+|---|---|---|
+| `~/.config/tokenmana/config.json` | your accounts and their names, groups, colours, auto-ping times, the menu-bar choice: every setting, **no credentials** | **yes** |
+| `~/.config/tokenmana/secrets.json` | Copilot sign-in tokens (file readable only by you) | no: sign in again instead; never share or commit it |
+| `~/.cache/tokenmana/` | last usage fetched, auto-ping state | no: rebuilt on its own |
+
+Claude and Codex logins are not TokenMana's: they stay where those CLIs keep them (the macOS Keychain or
+`~/.claude*/.credentials.json`, and `~/.codex*/auth.json`).
+
+**Open the folder.** `.config` starts with a dot, so Finder and file managers hide it. On macOS press ⌘⇧G in Finder
+and paste `~/.config/tokenmana` (⌘⇧. shows hidden files), or run `open ~/.config/tokenmana`; on Ubuntu,
+`xdg-open ~/.config/tokenmana` (Ctrl+H shows hidden files).
+
+**Back up / share a setup.** `config.json` alone is a complete, credential-free preset of your accounts: copy it
+anywhere, or keep it in your dotfiles (e.g. `chezmoi add ~/.config/tokenmana/config.json`), which also syncs it
+between your machines. Keep `secrets.json` out. Never paste a token into `config.json`: `token_cmd` / `token_env`
+name a command or a variable, not the token itself.
+
+**Restore on a new machine.**
+
+1. Put `config.json` in `~/.config/tokenmana/` **before** installing (the installer only creates a config when there is none).
+2. [Install](#install).
+3. Sign in to each account: *Sign In* in its menu, or `mana login <id>`.
+
+`TOKENMANA_CONFIG_DIR` / `TOKENMANA_CACHE_DIR` move these folders elsewhere (`XDG_CONFIG_HOME` / `XDG_CACHE_HOME` are honoured too).
+
 ## Config reference
 
-`~/.config/tokenmana/config.json` is the same file on both machines (sync it with chezmoi, for example):
+`~/.config/tokenmana/config.json` is the same file on both machines (see [Settings and backup](#settings-and-backup)):
 
 ```json
 {
@@ -192,10 +268,8 @@ accounts, in a separate internal repo. TokenMana itself then needs no changes fo
 | `vendor` | badge of the account (`anthropic`, `openai`, `github`, `bedrock`, `command`) |
 | `dashboard_url` | override (or `null` to hide) the "open usage page" button |
 
-Files: secrets (Copilot tokens) live in `~/.config/tokenmana/secrets.json` (0600), the cache in
-`~/.cache/tokenmana/state.json`, auto-ping state (last ping, pending questions) in `~/.cache/tokenmana/autoping.json`. Claude/Codex tokens are read where those CLIs keep them (the
-macOS Keychain or `~/.claude/.credentials.json`, and `auth.json`), only to call the usage endpoints.
-They are never written to the cache or printed.
+Claude/Codex tokens are read where those CLIs keep them, only to call the usage endpoints. They are never
+written to the cache or printed.
 
 ## Notes
 
@@ -203,3 +277,7 @@ They are never written to the cache or printed.
   public APIs and may change; if a provider breaks, the fix goes in one function in `core/mana.py`.
 - When a login token has expired, the card keeps the last data (marked ⚠). Windows whose reset time
   has passed drop to 0 / *idle*. Using the tool once, or pinging it, refreshes the token.
+
+## License
+
+[MIT](LICENSE) © Emmanuel Letremble
