@@ -26,11 +26,17 @@ One glance at every coding-assistant subscription: session (5 h) and weekly usag
 countdowns, monthly premium-request quotas, and budget spend. One click **pings** an account
 with its smallest model at low effort, which starts its 5 h session timer early.
 
+<p align="center">
+  <img src="docs/menu.png" width="440" alt="TokenMana menu on macOS: Claude, Codex and Copilot accounts and a team budget, in Personal and Work groups, with usage bars and reset countdowns">
+</p>
+
 - 📊 **All your quotas in one menu**: Claude, Codex, Copilot, and any source you can script.
 - 👥 **Several accounts per vendor** (perso, work, client…), each with its own login, sorted into coloured groups.
 - ⚡ **Ping and auto ping**: start a 5 h session early, every 5 h or at the times you choose.
 - 🖥️ **Native on both desktops**: a macOS menu-bar app and a GNOME top-bar extension, sharing one core.
 - 🔒 **Local and dependency-free**: one Python file, no telemetry; your logins are read only to call the usage endpoints.
+
+The same, from the terminal:
 
 ```text
 $ mana status
