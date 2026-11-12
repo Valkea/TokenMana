@@ -12,6 +12,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/TokenMana" "$APP/Contents/MacOS/"
 cp Info.plist "$APP/Contents/"
 cp ../core/mana.py "$APP/Contents/Resources/"
+cp -R ../core/tokenmana "$APP/Contents/Resources/"
+find "$APP/Contents/Resources/tokenmana" -name __pycache__ -prune -exec rm -rf {} +
 codesign --force --sign - "$APP" >/dev/null
 echo "built $APP"
 

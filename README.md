@@ -4,8 +4,8 @@
 
 **How much mana is left in each of your coding assistants, from the menu bar.**
 
-[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](core/mana.py)
-[![Python 3.9+](https://img.shields.io/badge/core-Python%203.9%2B-3776AB?logo=python&logoColor=white)](core/mana.py)
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](core/)
+[![Python 3.9+](https://img.shields.io/badge/core-Python%203.9%2B-3776AB?logo=python&logoColor=white)](core/)
 <br>
 [![Release](https://img.shields.io/github/v/tag/Valkea/TokenMana?sort=semver&label=release&color=7c3aed)](https://github.com/Valkea/TokenMana/tags)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -65,10 +65,11 @@ Copilot · company  Business · me-work
 |---|---|---|
 | macOS 14+ | menu-bar app (native `NSMenu`) | `macos/` |
 | Ubuntu 24.04 (GNOME 45–49) | top-bar extension | `gnome/` |
-| both | `mana` CLI = the shared core both UIs call | `core/mana.py` |
+| both | `mana` CLI = the shared core both UIs call | `core/` |
 
-The core is a single dependency-free Python file (3.9+). Every provider integration lives there, so
-the two UIs stay thin and behave identically.
+The core is dependency-free Python (3.9+): `core/mana.py` is the entry point and the code is in the
+`core/tokenmana/` package, one module per provider in `providers/`. Every provider integration lives
+there, so the two UIs stay thin and behave identically.
 
 ## Install
 
@@ -286,7 +287,7 @@ written to the cache or printed.
 ## Notes
 
 - The Claude, Codex and Copilot usage endpoints are the ones their own clients use. They are not
-  public APIs and may change; if a provider breaks, the fix goes in one function in `core/mana.py`.
+  public APIs and may change; if a provider breaks, the fix goes in its module in `core/tokenmana/providers/`.
 - When a login token has expired, the card keeps the last data (marked ⚠). Windows whose reset time
   has passed drop to 0 / *idle*. Using the tool once, or pinging it, refreshes the token.
 

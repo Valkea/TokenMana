@@ -11,7 +11,7 @@ enum CoreError: LocalizedError {
     }
 }
 
-/// Runs the shared Python core (`mana.py`, bundled in the app's Resources).
+/// Runs the shared Python core (`mana.py` + the `tokenmana` package, bundled in the app's Resources).
 enum Core {
     static let script: String? = {
         if let p = ProcessInfo.processInfo.environment["TOKENMANA_CORE"], FileManager.default.fileExists(atPath: p) {

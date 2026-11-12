@@ -53,6 +53,9 @@ DEST="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID"
 mkdir -p "$DEST" "$HOME/.local/bin"
 cp -r "$ROOT/gnome/$UUID/." "$DEST/"
 cp "$ROOT/core/mana.py" "$DEST/mana.py"
+rm -rf "$DEST/tokenmana"  # drop modules an older version had
+cp -R "$ROOT/core/tokenmana" "$DEST/tokenmana"
+find "$DEST/tokenmana" -name __pycache__ -prune -exec rm -rf {} +
 glib-compile-schemas "$DEST/schemas"
 
 cat > "$HOME/.local/bin/mana" <<EOF
