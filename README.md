@@ -25,10 +25,20 @@
 One glance at every coding-assistant subscription: session (5 h) and weekly usage with reset
 countdowns, monthly premium-request quotas, and budget spend. One click **pings** an account
 with its smallest model at low effort, which starts its 5 h session timer early.
-
-<p align="center">
+<table>
+<tr>
+<td>Menu on macOS</td>
+<td>Menu on Ubuntu</td>
+</tr>
+<tr>
+<td>
   <img src="docs/menu.png" width="440" alt="TokenMana menu on macOS: Claude, Codex and Copilot accounts and a team budget, in Personal and Work groups, with usage bars and reset countdowns">
-</p>
+</td>
+<td>
+  <img src="docs/menu-linux.png" width="440" alt="TokenMana menu on Ubuntu: Claude and Codex in a Personal group, with usage bars and reset countdowns">
+</td>
+</tr>
+</table>
 
 - 📊 **All your quotas in one menu**: Claude, Codex, Copilot, and any source you can script.
 - 👥 **Several accounts per vendor** (perso, work, client…), each with its own login, sorted into coloured groups.
