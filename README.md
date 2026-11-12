@@ -4,19 +4,15 @@
 
 **How much mana is left in each of your coding assistants, from the menu bar.**
 
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](core/mana.py)
+[![Python 3.9+](https://img.shields.io/badge/core-Python%203.9%2B-3776AB?logo=python&logoColor=white)](core/mana.py)
+<br>
 [![Release](https://img.shields.io/github/v/tag/Valkea/TokenMana?sort=semver&label=release&color=7c3aed)](https://github.com/Valkea/TokenMana/tags)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/Valkea/TokenMana)](https://github.com/Valkea/TokenMana/commits/main)
 <br>
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#install)
 [![Ubuntu 24.04 · GNOME 45–49](https://img.shields.io/badge/Ubuntu%2024.04-GNOME%2045%E2%80%9349-E95420?logo=ubuntu&logoColor=white)](#install)
-[![Python 3.9+](https://img.shields.io/badge/core-Python%203.9%2B-3776AB?logo=python&logoColor=white)](core/mana.py)
-[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](core/mana.py)
-<br>
-[![Claude](https://img.shields.io/badge/Claude-Pro%20%C2%B7%20Max-D97757?logo=anthropic&logoColor=white)](#accounts)
-[![Codex](https://img.shields.io/badge/Codex-Plus%20%C2%B7%20Pro%20%C2%B7%20Business-412991)](#accounts)
-[![GitHub Copilot](https://img.shields.io/badge/Copilot-premium%20requests-24292F?logo=githubcopilot&logoColor=white)](#accounts)
-[![Your own](https://img.shields.io/badge/%2B%20your%20own-any%20command-gray?logo=gnubash&logoColor=white)](#your-own-provider)
 
 [Install](#install) · [Accounts](#accounts) · [Ping](#ping) · [Your own provider](#your-own-provider) · [Settings & backup](#settings-and-backup) · [Config reference](#config-reference)
 
@@ -296,4 +292,4 @@ written to the cache or printed.
 
 ## License
 
-[MIT](LICENSE) © Emmanuel Letremble
+[MIT](LICENSE)
