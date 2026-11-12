@@ -11,6 +11,8 @@ GNOME Shell extension. Stdlib only, Python >= 3.9, macOS + Linux.
   mana login  [--json] ACCOUNT_ID
   mana add    TYPE [--label L] [--dir D] [--host H] [--command C]   (claude|codex|copilot|command)
   mana edit   ACCOUNT_ID [--label L] [--group G] [--host H] [--auto-ping off|5h|HH:MM,...]
+  mana rename-group OLD NEW      rename a group ("" to ungroup its accounts)
+  mana group-color GROUP COLOR   set a group's colour
   mana remove ACCOUNT_ID
   mana init   [--force]          write a starter config (auto-detected)
   mana paths                     print config / cache locations
@@ -77,6 +79,24 @@ AUTO_PING_RETRY = 15 * 60             # every-5h mode: wait this long after a fa
 # ───────────────────────────── helpers ──────────────────────────────────────
 
 class ProviderError(Exception):
+    """Error a provider reports for one account, shown to the user.
+
+    Parameters
+    ----------
+    message : str
+        Human-readable description of the problem.
+    hint : str, optional
+        Suggested next step, e.g. ``"mana login claude"``.
+    setup : bool, default False
+        True when the account is not set up on this device (not signed in,
+        CLI missing...) rather than temporarily failing.
+
+    Attributes
+    ----------
+    hint : str or None
+    setup : bool
+    """
+
     def __init__(self, message, hint=None, setup=False):
         super().__init__(message)
         self.hint = hint
@@ -84,6 +104,21 @@ class ProviderError(Exception):
 
 
 class ApiError(Exception):
+    """Non-2xx HTTP response from a vendor API.
+
+    Parameters
+    ----------
+    status : int
+        HTTP status code.
+    detail : str
+        Start of the response body, decoded.
+
+    Attributes
+    ----------
+    status : int
+    detail : str
+    """
+
     def __init__(self, status, detail):
         super().__init__(f"HTTP {status}: {detail}")
         self.status = status
@@ -91,19 +126,65 @@ class ApiError(Exception):
 
 
 def expand(p):
+    """Expand ``~`` and environment variables and make a path absolute.
+
+    Parameters
+    ----------
+    p : str or None
+        Path to expand.
+
+    Returns
+    -------
+    str or None
+        The absolute path, or `p` unchanged when it is empty or None.
+    """
     return os.path.abspath(os.path.expandvars(os.path.expanduser(p))) if p else p
 
 
 def utcnow():
+    """Return the current time as a timezone-aware UTC datetime.
+
+    Returns
+    -------
+    datetime.datetime
+    """
     return dt.datetime.now(dt.timezone.utc)
 
 
 def iso(t):
+    """Format a datetime as an ISO 8601 UTC string (``YYYY-MM-DDTHH:MM:SSZ``).
+
+    Parameters
+    ----------
+    t : datetime.datetime or None
+        Aware datetime (a naive one is taken as local time).
+
+    Returns
+    -------
+    str or None
+        The formatted string, or None when `t` is None.
+    """
     return t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if t else None
 
 
 def parse_time(v):
-    """Accept ISO strings (with Z / offsets / any fraction length), dates, epoch s/ms."""
+    """Parse a timestamp in any of the shapes vendor APIs return.
+
+    Accepts ISO 8601 strings (``Z`` or offset suffix, any fraction length,
+    space or ``T`` separator), bare dates, epoch seconds or milliseconds
+    (as numbers or numeric strings) and datetimes.
+
+    Parameters
+    ----------
+    v : str, int, float, datetime.datetime or None
+        Value to parse.
+
+    Returns
+    -------
+    datetime.datetime or None
+        Aware datetime (naive inputs are taken as UTC), or None when `v` is
+        empty or cannot be parsed.
+    """
     if v is None or v == "":
         return None
     if isinstance(v, dt.datetime):
@@ -130,12 +211,40 @@ def parse_time(v):
 
 
 def first_of_next_month(t=None):
+    """Return midnight UTC on the first day of the month after `t`.
+
+    Parameters
+    ----------
+    t : datetime.datetime, optional
+        Reference time; defaults to now.
+
+    Returns
+    -------
+    datetime.datetime
+    """
     t = t or utcnow()
     y, m = (t.year + 1, 1) if t.month == 12 else (t.year, t.month + 1)
     return dt.datetime(y, m, 1, tzinfo=dt.timezone.utc)
 
 
 def fmt_money(v, currency="USD"):
+    """Format an amount of money for display.
+
+    Amounts of 100 or more are rounded to whole units.
+
+    Parameters
+    ----------
+    v : float or None
+        Amount.
+    currency : str, default "USD"
+        ISO 4217 code. USD, EUR and GBP get their symbol; other codes are
+        appended.
+
+    Returns
+    -------
+    str
+        E.g. ``"$12.50"``, ``"1,200 CHF"``, or ``"—"`` when `v` is None.
+    """
     sym = {"USD": "$", "EUR": "€", "GBP": "£"}.get((currency or "USD").upper(), "")
     if v is None:
         return "—"
@@ -144,12 +253,32 @@ def fmt_money(v, currency="USD"):
 
 
 def fmt_num(v):
+    """Format a count with thousands separators, one decimal if not integral.
+
+    Parameters
+    ----------
+    v : float or None
+
+    Returns
+    -------
+    str
+        E.g. ``"1,500"``, ``"2.5"``, or ``"—"`` when `v` is None.
+    """
     if v is None:
         return "—"
     return f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}"
 
 
 def search_path():
+    """Return the directories to search for executables.
+
+    ``$PATH``, followed by the ``EXTRA_PATH`` install locations that exist on
+    this machine (GUI apps and shell extensions start with a minimal PATH).
+
+    Returns
+    -------
+    list of str
+    """
     dirs = os.environ.get("PATH", "").split(os.pathsep)
     for p in EXTRA_PATH:
         for d in (sorted(glob.glob(expand(p))) if "*" in p else [expand(p)]):
@@ -159,6 +288,21 @@ def search_path():
 
 
 def which(name, override=None):
+    """Locate an executable.
+
+    Parameters
+    ----------
+    name : str
+        Command name, looked up on `search_path`, or a path.
+    override : str, optional
+        Explicit path from the account config, used instead of `name`.
+
+    Returns
+    -------
+    str or None
+        Absolute path of the executable, or None when it is not found or not
+        executable.
+    """
     if override:
         p = expand(override)
         return p if os.path.isfile(p) and os.access(p, os.X_OK) else None
@@ -169,6 +313,19 @@ def which(name, override=None):
 
 
 def tool_env(**overrides):
+    """Build the environment for running a vendor CLI.
+
+    Parameters
+    ----------
+    **overrides : str or None
+        Variables to set; a None value removes the variable.
+
+    Returns
+    -------
+    dict of str to str
+        A copy of ``os.environ`` with ``PATH`` extended by `search_path` and
+        `overrides` applied.
+    """
     env = dict(os.environ)
     env["PATH"] = os.pathsep.join(search_path())
     for k, v in overrides.items():
@@ -180,6 +337,35 @@ def tool_env(**overrides):
 
 
 def http_json(url, headers=None, data=None, timeout=20, form=False):
+    """Send an HTTP request and decode the JSON response.
+
+    The request is a GET, or a POST when `data` is given.
+
+    Parameters
+    ----------
+    url : str
+    headers : dict, optional
+        Extra headers, merged over the defaults (JSON ``Accept`` and the
+        TokenMana ``User-Agent``).
+    data : dict, optional
+        Request body, sent as JSON or as a form.
+    timeout : float, default 20
+        Seconds.
+    form : bool, default False
+        Send `data` as ``application/x-www-form-urlencoded``.
+
+    Returns
+    -------
+    object
+        The decoded JSON body (None for an empty body).
+
+    Raises
+    ------
+    ApiError
+        On an HTTP error status.
+    ProviderError
+        On a network error or timeout.
+    """
     body = None
     hdrs = {"Accept": "application/json", "User-Agent": f"tokenmana/{VERSION}"}
     hdrs.update(headers or {})
@@ -206,6 +392,17 @@ def http_json(url, headers=None, data=None, timeout=20, form=False):
 
 
 def jwt_claims(token):
+    """Decode the payload of a JWT without verifying its signature.
+
+    Parameters
+    ----------
+    token : str
+
+    Returns
+    -------
+    dict
+        The claims, or an empty dict when `token` is not a decodable JWT.
+    """
     try:
         part = token.split(".")[1]
         return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
@@ -214,6 +411,18 @@ def jwt_claims(token):
 
 
 def read_json(path, default=None):
+    """Load a JSON file.
+
+    Parameters
+    ----------
+    path : str
+    default : object, optional
+        Returned when the file is missing, unreadable or not valid JSON.
+
+    Returns
+    -------
+    object
+    """
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
@@ -222,6 +431,18 @@ def read_json(path, default=None):
 
 
 def write_json(path, data, mode=None):
+    """Write JSON to a file atomically (temporary file, then rename).
+
+    Parent directories are created as needed.
+
+    Parameters
+    ----------
+    path : str
+    data : object
+        JSON-serializable value, written indented.
+    mode : int, optional
+        File permissions, e.g. ``0o600`` for secrets.
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -233,6 +454,19 @@ def write_json(path, data, mode=None):
 
 
 def keychain_read(service):
+    """Read a generic password from the macOS login keychain.
+
+    Parameters
+    ----------
+    service : str
+        Service name of the keychain item.
+
+    Returns
+    -------
+    str or None
+        The secret, or None off macOS, when the item does not exist or when
+        access fails.
+    """
     if not IS_MAC:
         return None
     try:
@@ -244,6 +478,32 @@ def keychain_read(service):
 
 
 def metric(key, label, percent=None, text=None, resets_at=None, window=None, idle=False):
+    """Build one metric in the normalized output shape.
+
+    Parameters
+    ----------
+    key : str
+        Stable identifier, e.g. ``"session"`` or ``"weekly_all"``.
+    label : str
+        Display name.
+    percent : float, optional
+        Share of the limit used, 0-100 (may exceed 100); clamped at 0 and
+        rounded to 0.1.
+    text : str, optional
+        Display value; defaults to ``"idle"``, the rounded percent, or ``"—"``.
+    resets_at : str, int, float or datetime.datetime, optional
+        When the limit resets; anything `parse_time` accepts.
+    window : int, optional
+        Length of the limit's window, in seconds.
+    idle : bool, default False
+        True when the window has not started (no session running).
+
+    Returns
+    -------
+    dict
+        ``key``, ``label``, ``percent``, ``text``, ``resets_at`` (ISO string or
+        None), ``window_seconds`` and ``idle``.
+    """
     if percent is not None:
         percent = max(0.0, round(float(percent), 1))
     if text is None:
@@ -253,6 +513,20 @@ def metric(key, label, percent=None, text=None, resets_at=None, window=None, idl
 
 
 def window_label(seconds, fallback):
+    """Name a rate-limit window from its length.
+
+    Parameters
+    ----------
+    seconds : int or None
+        Window length.
+    fallback : str
+        Returned when `seconds` is unknown.
+
+    Returns
+    -------
+    str
+        ``"Session · 5h"``, ``"Weekly"``, ``"N-day window"`` or ``"Nh window"``.
+    """
     if not seconds:
         return fallback
     if abs(seconds - SESSION_WINDOW) < 60:
@@ -265,10 +539,24 @@ def window_label(seconds, fallback):
 
 
 def secrets_load():
+    """Load the tokens TokenMana stored itself (``secrets.json``).
+
+    Returns
+    -------
+    dict of str to str
+        Token by account id; empty when there is no file.
+    """
     return read_json(SECRETS_PATH, {}) or {}
 
 
 def secrets_save(account_id, token):
+    """Store an account's token in ``secrets.json`` (mode 0600).
+
+    Parameters
+    ----------
+    account_id : str
+    token : str
+    """
     data = secrets_load()
     data[account_id] = token
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
@@ -276,6 +564,19 @@ def secrets_save(account_id, token):
 
 
 def copy_to_clipboard(text):
+    """Copy text to the clipboard with the first available tool.
+
+    Tries ``pbcopy``, ``wl-copy``, ``xclip`` then ``xsel``.
+
+    Parameters
+    ----------
+    text : str
+
+    Returns
+    -------
+    bool
+        True when a clipboard tool ran.
+    """
     for argv in (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "-ib"]):
         exe = which(argv[0])
         if exe:
@@ -288,6 +589,12 @@ def copy_to_clipboard(text):
 
 
 def open_url(url):
+    """Open a URL in the default browser, ignoring failures.
+
+    Parameters
+    ----------
+    url : str
+    """
     try:
         if IS_MAC:
             subprocess.Popen(["/usr/bin/open", url])
@@ -313,7 +620,20 @@ CLAUDE_LIMIT_LABELS = {
 
 
 def claude_scope_name(scope):
-    """Readable name of a limit's scope: a string, or {"model": {...}, "surface": ...} objects."""
+    """Return a readable name for the scope of a Claude limit.
+
+    Parameters
+    ----------
+    scope : str, dict or None
+        A string, an object with ``display_name`` / ``id``, or a dict of such
+        values (e.g. ``{"model": {...}, "surface": ...}``) whose names are
+        joined with ``" · "``.
+
+    Returns
+    -------
+    str
+        Empty when there is no scope.
+    """
     if not scope:
         return ""
     if isinstance(scope, str):
@@ -326,14 +646,60 @@ def claude_scope_name(scope):
 
 
 def claude_dir(acc):
+    """Return the account's Claude Code config dir (``CLAUDE_CONFIG_DIR``).
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    str
+        Absolute path; ``~/.claude`` unless ``config_dir`` is set.
+    """
     return expand(acc.get("config_dir") or "~/.claude")
 
 
 def claude_is_default_dir(acc):
+    """Tell whether the account uses Claude Code's default config dir.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    bool
+    """
     return os.path.realpath(claude_dir(acc)) == os.path.realpath(expand("~/.claude"))
 
 
 def claude_credentials(acc):
+    """Read the Claude Code OAuth credentials of an account.
+
+    On macOS the keychain is tried first: the account's ``keychain_service``,
+    else the item name Claude Code derives from the config dir. The
+    ``.credentials.json`` file in the config dir is the fallback (Linux).
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    dict
+        The ``claudeAiOauth`` object (``accessToken``, ``expiresAt``,
+        ``subscriptionType``...), possibly empty.
+
+    Raises
+    ------
+    ProviderError
+        When no credentials are found (``setup=True``) or they are not valid
+        JSON.
+    """
     cdir = claude_dir(acc)
     raw = None
     if IS_MAC:
@@ -365,6 +731,14 @@ def claude_credentials(acc):
 
 
 def claude_keychain_services():
+    """List the Claude Code credential items in the macOS keychain.
+
+    Returns
+    -------
+    set of str
+        Service names starting with ``"Claude Code-credentials"``; empty off
+        macOS or on failure.
+    """
     if not IS_MAC:
         return set()
     try:
@@ -375,12 +749,47 @@ def claude_keychain_services():
 
 
 def claude_identity(acc):
+    """Return the email address of the signed-in Claude account.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    str or None
+        Read from ``.claude.json`` (``~/.claude.json`` for the default config
+        dir).
+    """
     path = expand("~/.claude.json") if claude_is_default_dir(acc) else os.path.join(claude_dir(acc), ".claude.json")
     acct = (read_json(path, {}) or {}).get("oauthAccount") or {}
     return acct.get("emailAddress")
 
 
 def fetch_claude(acc):
+    """Fetch the plan limits of a Claude Pro / Max account.
+
+    Calls the OAuth usage endpoint with Claude Code's token. Reads the
+    ``limits`` list when present, else the older ``five_hour`` /
+    ``seven_day*`` fields, plus the extra-usage spend when enabled.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"claude"``.
+
+    Returns
+    -------
+    dict
+        ``plan``, ``identity``, ``metrics`` (see `metric`) and ``notes``.
+
+    Raises
+    ------
+    ProviderError
+        When not signed in, the token is expired or rejected, or the request
+        fails.
+    """
     tok = claude_credentials(acc)
     access = tok.get("accessToken")
     if not access:
@@ -453,6 +862,29 @@ def fetch_claude(acc):
 # The README has the full format.
 
 def fetch_command(acc):
+    """Run the account's command and read the TokenMana JSON it prints.
+
+    Lines printed before the JSON object are ignored. The format is shown in
+    the comment above and documented in the README.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"command"``, with ``command`` (split like a
+        shell command line, but not run through a shell) and optionally
+        ``login_hint``.
+
+    Returns
+    -------
+    dict
+        ``plan``, ``identity``, ``vendor``, ``metrics`` and ``notes``.
+
+    Raises
+    ------
+    ProviderError
+        When the command is missing, not found, times out (90 s) or fails, or
+        prints ``{"error": ...}`` or no valid JSON object.
+    """
     if not acc.get("command"):
         raise ProviderError("No command set for this account", setup=True)
     argv = shlex.split(acc["command"])
@@ -491,11 +923,39 @@ def fetch_command(acc):
 # -- OpenAI Codex (ChatGPT Plus / Pro / Business via Codex CLI login) -------
 
 def codex_home(acc):
+    """Return the account's Codex CLI home (``CODEX_HOME``).
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    str
+        Absolute path; ``~/.codex`` unless ``codex_home`` is set.
+    """
     return expand(acc.get("codex_home") or "~/.codex")
 
 
 def codex_rollout_limits(home):
-    """Fallback: last rate_limits snapshot written by the Codex CLI in its session logs."""
+    """Read the last rate-limit snapshot from the Codex CLI session logs.
+
+    Fallback for when the usage API cannot be reached: scans the end of the
+    five most recent ``sessions/**/rollout-*.jsonl`` files.
+
+    Parameters
+    ----------
+    home : str
+        Codex home directory.
+
+    Returns
+    -------
+    metrics : list of dict or None
+        Metrics built with `metric`, or None when no snapshot is found.
+    at : datetime.datetime or None
+        When the snapshot was written.
+    """
     files = glob.glob(os.path.join(home, "sessions", "**", "rollout-*.jsonl"), recursive=True)
     files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     for path in files[:5]:
@@ -534,6 +994,28 @@ def codex_rollout_limits(home):
 
 
 def fetch_codex(acc):
+    """Fetch the plan limits of a Codex (ChatGPT plan) account.
+
+    Uses the Codex CLI login (``auth.json``). When the usage API fails, falls
+    back to `codex_rollout_limits` and reports the error as partial.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"codex"``.
+
+    Returns
+    -------
+    dict
+        ``plan``, ``identity``, ``metrics`` and ``notes``, plus
+        ``_partial_error`` when the data comes from the session logs.
+
+    Raises
+    ------
+    ProviderError
+        When not signed in, signed in with an API key, or the API fails and
+        no session log has limits.
+    """
     home = codex_home(acc)
     auth = read_json(os.path.join(home, "auth.json"))
     if not auth:
@@ -597,15 +1079,58 @@ def fetch_codex(acc):
 # -- GitHub Copilot (premium requests) ---------------------------------------
 
 def normalize_host(value):
-    """'https://mycorp.ghe.com/' → 'mycorp.ghe.com'"""
+    """Reduce a GitHub host URL to its bare lower-case host name.
+
+    Parameters
+    ----------
+    value : str or None
+        E.g. ``"https://mycorp.ghe.com/"``.
+
+    Returns
+    -------
+    str
+        E.g. ``"mycorp.ghe.com"``; empty when `value` is empty.
+    """
     return re.sub(r"^[a-z]+://", "", (value or "").strip(), flags=re.I).strip("/").split("/")[0].lower()
 
 
 def copilot_host(acc):
+    """Return the GitHub host of a Copilot account.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    str
+        ``"github.com"`` unless ``host`` is set (GitHub Enterprise Cloud).
+    """
     return normalize_host(acc.get("host")) or "github.com"
 
 
 def copilot_token(acc):
+    """Find the GitHub OAuth token of a Copilot account.
+
+    Sources, in order: the ``token_env`` environment variable, the output of
+    ``token_cmd``, ``secrets.json`` (written by ``mana login``), then the
+    editor-plugin files in ``~/.config/github-copilot`` for ``github_user``.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"copilot"``.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ProviderError
+        When ``token_cmd`` fails or no token is found (``setup=True``).
+    """
     if acc.get("token_env") and os.environ.get(acc["token_env"]):
         return os.environ[acc["token_env"]].strip()
     if acc.get("token_cmd"):
@@ -633,11 +1158,44 @@ def copilot_token(acc):
 
 
 def copilot_api(acc):
+    """Return the REST API base URL of the account's GitHub host.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    str
+        ``https://api.github.com`` or ``https://api.<host>``.
+    """
     host = copilot_host(acc)
     return "https://api.github.com" if host == "github.com" else f"https://api.{host}"
 
 
 def copilot_user(acc, token):
+    """Call the Copilot ``copilot_internal/user`` endpoint.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+    token : str
+        GitHub OAuth token.
+
+    Returns
+    -------
+    dict
+        Plan, login, quota snapshots and reset date.
+
+    Raises
+    ------
+    ApiError
+        When GitHub refuses the request.
+    ProviderError
+        On a network error.
+    """
     return http_json(copilot_api(acc) + "/copilot_internal/user", headers={
         "Authorization": f"token {token}", "Editor-Version": "vscode/1.105.0",
         "Editor-Plugin-Version": "copilot-chat/0.32.0", "User-Agent": "GitHubCopilotChat/0.32.0",
@@ -645,6 +1203,24 @@ def copilot_user(acc, token):
 
 
 def fetch_copilot(acc):
+    """Fetch the monthly quotas of a GitHub Copilot account.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"copilot"``.
+
+    Returns
+    -------
+    dict
+        ``plan``, ``identity`` (GitHub login), ``metrics`` (premium requests,
+        plus chat / completions when limited) and ``notes`` (overage).
+
+    Raises
+    ------
+    ProviderError
+        When no token is found or GitHub refuses it.
+    """
     try:
         d = copilot_user(acc, copilot_token(acc))
     except ApiError as e:
@@ -702,6 +1278,18 @@ PROVIDERS = {
 
 
 def fetch_unknown(acc):
+    """Fetch function for account types this version does not know.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Raises
+    ------
+    ProviderError
+        Always, with ``setup=True``.
+    """
     raise ProviderError(f"Unknown account type {acc.get('type')!r}",
                         hint="Update TokenMana, or remove this account", setup=True)
 
@@ -710,13 +1298,48 @@ UNKNOWN_PROVIDER = {"fetch": fetch_unknown, "vendor": "unknown", "ping": False, 
 
 
 def provider(acc):
-    """The account's provider; a config written by a newer or extended version may name other types."""
+    """Return the provider entry for an account's type.
+
+    A config written by a newer or extended version may name other types.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    dict
+        Entry of `PROVIDERS`, or `UNKNOWN_PROVIDER`.
+    """
     return PROVIDERS.get(acc.get("type"), UNKNOWN_PROVIDER)
 
 
 # ───────────────────────────── ping ─────────────────────────────────────────
 
 def ping_command(acc):
+    """Build the vendor CLI command that sends a ping prompt.
+
+    Uses the smallest model and effort (overridable in the account's
+    ``ping`` config) and no tools, MCP servers or session persistence.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"claude"`` or ``"codex"``.
+
+    Returns
+    -------
+    argv : list of str
+        Command line.
+    env : dict of str to str
+        Environment, without API keys so that the subscription is used.
+
+    Raises
+    ------
+    ProviderError
+        When the CLI is not found or the type has no session to start.
+    """
     t = acc["type"]
     p = acc.get("ping") or {}
     prompt = p.get("prompt") or PING_PROMPT
@@ -745,6 +1368,21 @@ def ping_command(acc):
 
 
 def ping_account(acc):
+    """Send a ping prompt to start the account's 5 h session window.
+
+    Runs in a temporary directory with a 180 s timeout.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    dict
+        ``id``, ``ok`` and ``seconds``; ``output`` (last line, truncated)
+        when the CLI ran; ``error`` on failure.
+    """
     started = time.time()
     try:
         argv, env = ping_command(acc)
@@ -775,7 +1413,24 @@ def ping_account(acc):
 # next time?". Run state (last ping, handled times, pending question) is kept in autoping.json.
 
 def parse_ping_times(value):
-    """'8:00, 13:01' or ['08:00', '13h01'] → ['08:00', '13:01'] (sorted, no duplicates)."""
+    """Normalize a list of scheduled ping times.
+
+    Parameters
+    ----------
+    value : str or list of str
+        E.g. ``"8:00, 13:01"`` or ``["08:00", "13h01"]``; ``8``, ``8h`` and
+        ``8.30`` are accepted too.
+
+    Returns
+    -------
+    list of str
+        ``HH:MM`` times, sorted, without duplicates.
+
+    Raises
+    ------
+    ValueError
+        When a time is not a valid 24 h time.
+    """
     items = value if isinstance(value, list) else re.split(r"[\s,;]+", str(value or ""))
     out = set()
     for raw in items:
@@ -791,7 +1446,24 @@ def parse_ping_times(value):
 
 
 def parse_auto_ping(value):
-    """CLI value → config value: 'off' → None, '5h' → interval, '08:00,13:01' → times."""
+    """Convert a ``--auto-ping`` CLI value into the account's config value.
+
+    Parameters
+    ----------
+    value : str or None
+        ``"off"`` (or empty), ``"5h"``, or times such as ``"08:00,13:01"``.
+
+    Returns
+    -------
+    dict or None
+        None for off, ``{"mode": "interval"}``, or
+        ``{"mode": "times", "times": [...]}``.
+
+    Raises
+    ------
+    ValueError
+        When a time is invalid.
+    """
     v = (value or "").strip().lower()
     if v in ("", "off", "none", "no", "false"):
         return None
@@ -802,7 +1474,19 @@ def parse_auto_ping(value):
 
 
 def auto_ping_conf(acc):
-    """{"mode": "interval"} | {"mode": "times", "times": [...]} | None (off, or the account has no ping)."""
+    """Return the account's valid auto-ping schedule.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    dict or None
+        ``{"mode": "interval"}`` or ``{"mode": "times", "times": [...]}``;
+        None when auto ping is off or invalid, or the account cannot ping.
+    """
     c = acc.get("auto_ping")
     if not isinstance(c, dict) or not provider(acc)["ping"] or acc.get("ping") is False:
         return None
@@ -818,11 +1502,35 @@ def auto_ping_conf(acc):
 
 
 def auto_ping_sig(conf):
+    """Return a stable signature of a schedule, to detect changes.
+
+    Parameters
+    ----------
+    conf : dict
+        Schedule from `auto_ping_conf`.
+
+    Returns
+    -------
+    str
+    """
     return json.dumps(conf, sort_keys=True)
 
 
 def local_slots(times, start, end):
-    """Scheduled times (local clock) in (start, end], oldest first."""
+    """List the scheduled times that fall in an interval.
+
+    Parameters
+    ----------
+    times : list of str
+        ``HH:MM`` times on the local clock.
+    start, end : datetime.datetime
+        Aware bounds of the interval ``(start, end]``.
+
+    Returns
+    -------
+    list of datetime.datetime
+        Aware local datetimes, oldest first.
+    """
     out = []
     day, last = start.astimezone().date(), end.astimezone().date()
     while day <= last:
@@ -836,12 +1544,37 @@ def local_slots(times, start, end):
 
 
 def next_slot(times, after):
+    """Return the first scheduled time after a given moment.
+
+    Parameters
+    ----------
+    times : list of str
+        ``HH:MM`` times on the local clock.
+    after : datetime.datetime
+
+    Returns
+    -------
+    datetime.datetime or None
+        None when `times` is empty.
+    """
     slots = local_slots(times, after, after + dt.timedelta(days=2))
     return slots[0] if slots else None
 
 
 def session_busy_until(entry):
-    """End of the account's running 5 h session + 1 min, from its cached fetch; None if none is known."""
+    """Return when the account's 5 h session ends, plus one minute.
+
+    Parameters
+    ----------
+    entry : dict or None
+        The account's cached fetch from ``state.json``.
+
+    Returns
+    -------
+    datetime.datetime or None
+        May be in the past if the cache is old. None when no session is known
+        (idle, no reset time, or the account is not set up).
+    """
     if (entry or {}).get("status") == "setup":
         return None
     for m in ((entry or {}).get("data") or {}).get("metrics") or []:
@@ -853,7 +1586,16 @@ def session_busy_until(entry):
 
 @contextlib.contextmanager
 def schedule_state():
-    """Locked read-modify-write of autoping.json (the UI timer, manual pings and cron can overlap)."""
+    """Lock ``autoping.json`` for a read-modify-write.
+
+    The UI timers, manual pings and cron can run at the same time, so access
+    is serialized with an exclusive ``flock``.
+
+    Yields
+    ------
+    dict
+        Schedule records by account id; changes are written back on exit.
+    """
     os.makedirs(CACHE_DIR, exist_ok=True)
     with open(SCHEDULE_PATH + ".lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -863,8 +1605,27 @@ def schedule_state():
 
 
 def auto_ping_step(conf, entry, e, now):
-    """Is a ping due for this account? Returns the time it is for, or None.
-    entry: the account's cached fetch (state.json); e: its schedule record, updated in place."""
+    """Decide whether an auto ping is due for one account.
+
+    Also updates the account's schedule record: resets it when the schedule
+    changed, and turns a scheduled time missed while the device was asleep
+    or off into a pending question, unless a session is already running.
+
+    Parameters
+    ----------
+    conf : dict
+        Schedule from `auto_ping_conf`.
+    entry : dict
+        The account's cached fetch from ``state.json``.
+    e : dict
+        The account's record in ``autoping.json``, updated in place.
+    now : datetime.datetime
+
+    Returns
+    -------
+    datetime.datetime or None
+        The time the ping is for, or None when none is due.
+    """
     sig = auto_ping_sig(conf)
     if e.get("sig") != sig:  # new or changed schedule: start from now, ask nothing about the past
         e.update(sig=sig, handled_until=iso(now), missed=None, error=None, retry_at=None)
@@ -891,7 +1652,24 @@ def auto_ping_step(conf, entry, e, now):
 
 
 def auto_ping_info(acc, e, entry, now):
-    """For the UIs: the schedule, when the next ping is, a pending question, the last error."""
+    """Describe an account's auto ping for the UIs.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+    e : dict or None
+        The account's record in ``autoping.json``.
+    entry : dict or None
+        The account's cached fetch from ``state.json``.
+    now : datetime.datetime
+
+    Returns
+    -------
+    dict or None
+        ``mode``, ``times``, ``last_ping``, ``last_auto``, ``missed`` (pending
+        question), ``error`` and ``next_at``; None when auto ping is off.
+    """
     conf = auto_ping_conf(acc)
     if not conf:
         return None
@@ -913,7 +1691,16 @@ def auto_ping_info(acc, e, entry, now):
 
 
 def record_pings(results):
-    """Successful pings restart the every-5h chain and answer a pending question."""
+    """Record successful pings in the auto-ping schedule.
+
+    A successful ping restarts the every-5h chain and answers a pending
+    missed-ping question.
+
+    Parameters
+    ----------
+    results : list of dict
+        Results of `ping_account`.
+    """
     now = iso(utcnow())
     if not any(r["ok"] for r in results):
         return
@@ -924,6 +1711,24 @@ def record_pings(results):
 
 
 def run_auto_pings(cfg):
+    """Run the auto pings that are due and report the missed ones.
+
+    Accounts pinged successfully are refreshed afterwards. A failed ping
+    becomes a missed-ping question in times mode, or is retried after
+    ``AUTO_PING_RETRY`` in interval mode.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+
+    Returns
+    -------
+    dict
+        ``pinged``: `ping_account` results with the ``slot`` they were for;
+        ``missed``: pending questions (``id``, ``label``, ``slot``, ``error``,
+        ``next``).
+    """
     accs = {}
     for a in cfg["accounts"]:
         conf = auto_ping_conf(a) if enabled_here(a) else None
@@ -968,6 +1773,18 @@ def run_auto_pings(cfg):
 # ───────────────────────────── login ────────────────────────────────────────
 
 def emit(event, as_json, **kw):
+    """Report a login event, as a JSON line or as text.
+
+    Parameters
+    ----------
+    event : str
+        ``"code"``, ``"url"``, ``"log"``, ``"info"``, ``"done"`` or ``"error"``.
+    as_json : bool
+        Print one JSON object per line (for the UIs) instead of text.
+    **kw
+        Event fields, e.g. ``message``, ``line``, ``user_code``,
+        ``verification_uri``.
+    """
     if as_json:
         print(json.dumps(dict(event=event, **kw)), flush=True)
     elif event == "code":
@@ -978,6 +1795,29 @@ def emit(event, as_json, **kw):
 
 
 def login_copilot(acc, as_json):
+    """Sign a Copilot account in with the GitHub device flow.
+
+    Shows (and copies) the user code, opens the verification page, polls for
+    the token, checks that the account has Copilot, then stores the token in
+    ``secrets.json``.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"copilot"``.
+    as_json : bool
+        Emit JSON events.
+
+    Returns
+    -------
+    int
+        Exit code: 0 when signed in.
+
+    Raises
+    ------
+    ApiError, ProviderError
+        When a device-flow request fails.
+    """
     host = copilot_host(acc)
     d = http_json(f"https://{host}/login/device/code", data={"client_id": COPILOT_CLIENT_ID, "scope": "read:user"},
                   form=True)
@@ -1015,7 +1855,27 @@ def login_copilot(acc, as_json):
 
 
 def login_cli(acc, argv, env, as_json):
-    """Run a vendor CLI login (it opens the browser itself) and stream its output."""
+    """Run a vendor CLI login and stream its output.
+
+    The CLI opens the browser itself; in JSON mode, URLs found in its output
+    are also emitted as ``url`` events.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config (unused).
+    argv : list of str
+        Login command line.
+    env : dict of str to str
+        Environment for the command.
+    as_json : bool
+        Emit JSON events.
+
+    Returns
+    -------
+    int
+        The command's exit code.
+    """
     proc = subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             stdin=subprocess.DEVNULL if as_json else None)
     for line in proc.stdout:
@@ -1031,6 +1891,22 @@ def login_cli(acc, argv, env, as_json):
 
 
 def cmd_login(args):
+    """``mana login ACCOUNT_ID``: sign an account in on this device.
+
+    Copilot uses the GitHub device flow; Claude and Codex run their CLI's
+    login in the account's config dir. For Claude, the keychain item the
+    login creates is saved as the account's ``keychain_service``.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``account`` and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     acc = find_account(load_config(), args.account)
     t = acc["type"]
     try:
@@ -1070,6 +1946,16 @@ def cmd_login(args):
 # ───────────────────────────── config / state ───────────────────────────────
 
 def autodetect_accounts():
+    """Find the accounts already signed in on this device.
+
+    Looks for Claude Code credentials in the default config dir and for
+    ``~/.codex*`` homes containing an ``auth.json``.
+
+    Returns
+    -------
+    list of dict
+        Account configs.
+    """
     accs = []
     if (IS_MAC and keychain_read("Claude Code-credentials")) or os.path.exists(expand("~/.claude/.credentials.json")):
         accs.append({"id": "claude", "label": "Claude", "type": "claude"})
@@ -1082,6 +1968,18 @@ def autodetect_accounts():
 
 
 def load_config():
+    """Load ``config.json``, creating it from detected accounts if missing.
+
+    Returns
+    -------
+    dict
+        The config, with an ``accounts`` list.
+
+    Raises
+    ------
+    SystemExit
+        When the file exists but is not valid JSON.
+    """
     cfg = read_json(CONFIG_PATH)
     if cfg is None:
         if os.path.exists(CONFIG_PATH):
@@ -1093,6 +1991,14 @@ def load_config():
 
 
 def update_account(account_id, **fields):
+    """Set fields of one account in ``config.json``.
+
+    Parameters
+    ----------
+    account_id : str
+    **fields
+        Values to set.
+    """
     cfg = read_json(CONFIG_PATH, {}) or {}
     for a in cfg.get("accounts", []):
         if a.get("id") == account_id:
@@ -1101,6 +2007,18 @@ def update_account(account_id, **fields):
 
 
 def slugify(text):
+    """Make an account id from a label.
+
+    Parameters
+    ----------
+    text : str or None
+
+    Returns
+    -------
+    str
+        Lower-case letters, digits and dashes, at most 32 characters;
+        ``"account"`` when nothing is left.
+    """
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:32] or "account"
 
 
@@ -1113,6 +2031,28 @@ ACCOUNT_TYPES = {
 
 
 def cmd_add(args):
+    """``mana add TYPE``: add an account to the config.
+
+    The id comes from ``--id`` or the label and is made unique. Each extra
+    Claude / Codex account gets its own config dir (``~/.claude-<id>``,
+    ``~/.codex-<id>``) so that it keeps its own login.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``type``, ``label``, ``id``, ``dir``, ``host``, ``command``, ``group``,
+        ``this_device_only`` and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+
+    Raises
+    ------
+    SystemExit
+        When a command account has no ``--command``.
+    """
     cfg = load_config()
     t = args.type
     label = args.label or ACCOUNT_TYPES[t]["name"]
@@ -1151,6 +2091,27 @@ def cmd_add(args):
 
 
 def cmd_edit(args):
+    """``mana edit ACCOUNT_ID``: change an account's label, group, host or auto ping.
+
+    Changing a Copilot host drops the stored token and the cached data.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``account``, ``label``, ``group`` (empty to ungroup), ``host``,
+        ``auto_ping`` and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+
+    Raises
+    ------
+    SystemExit
+        When the account is unknown, or the auto-ping value is invalid or not
+        supported by the account.
+    """
     cfg = load_config()
     acc = find_account(cfg, args.account)
     if args.label is not None and args.label.strip():
@@ -1192,6 +2153,21 @@ def cmd_edit(args):
 
 
 def cmd_rename_group(args):
+    """``mana rename-group OLD NEW``: rename a group, or ungroup its accounts.
+
+    Matching is case-insensitive; the group's place in ``groups`` and its
+    colour follow the new name.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``old``, ``new`` (empty to ungroup) and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     cfg = load_config()
     old, new = args.old.strip().casefold(), args.new.strip()
     n = 0
@@ -1220,6 +2196,18 @@ def cmd_rename_group(args):
 
 
 def cmd_group_color(args):
+    """``mana group-color GROUP COLOR``: set a group's colour.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``group``, ``color`` (one of `GROUP_PALETTE`) and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     cfg = load_config()
     colors = {k: v for k, v in (cfg.get("group_colors") or {}).items() if k.casefold() != args.group.casefold()}
     colors[canonical_group(cfg, args.group)] = args.color
@@ -1230,6 +2218,26 @@ def cmd_group_color(args):
 
 
 def cmd_remove(args):
+    """``mana remove ACCOUNT_ID``: remove an account and everything stored for it.
+
+    Drops it from the config, along with its token, cached data and
+    auto-ping record.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``account`` and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+
+    Raises
+    ------
+    SystemExit
+        When the account is unknown.
+    """
     cfg = load_config()
     find_account(cfg, args.account)
     cfg["accounts"] = [a for a in cfg["accounts"] if a.get("id") != args.account]
@@ -1248,6 +2256,18 @@ def cmd_remove(args):
 
 
 def enabled_here(acc):
+    """Tell whether an account is enabled on this device.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config; ``"enabled": false`` disables it and ``platforms``
+        (e.g. ``["macos"]``) restricts it.
+
+    Returns
+    -------
+    bool
+    """
     if acc.get("enabled") is False:
         return False
     plats = acc.get("platforms")
@@ -1256,6 +2276,24 @@ def enabled_here(acc):
 
 
 def find_account(cfg, account_id):
+    """Return an account of the config by id.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    account_id : str
+
+    Returns
+    -------
+    dict
+        The account config (the same object, so it can be edited).
+
+    Raises
+    ------
+    SystemExit
+        When there is no such account.
+    """
     for a in cfg["accounts"]:
         if a.get("id") == account_id:
             return a
@@ -1263,12 +2301,42 @@ def find_account(cfg, account_id):
 
 
 def refresh_seconds(acc, cfg):
+    """Return how often an account is refreshed.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+    cfg : dict
+        Loaded config.
+
+    Returns
+    -------
+    float
+        Seconds, from the account, its provider, the config or the default,
+        in that order; at least 60.
+    """
     m = acc.get("refresh_minutes") or provider(acc).get("refresh_minutes") \
         or cfg.get("refresh_minutes") or DEFAULT_REFRESH_MIN
     return max(1, float(m)) * 60
 
 
 def fetch_into_state(acc, state):
+    """Fetch one account and store the outcome in the cache.
+
+    Never raises: errors are recorded in the entry so that one provider
+    cannot break the others.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+    state : dict
+        Cache by account id (``state.json``), updated in place. The entry gets
+        ``fetched_at``, ``status`` (``ok``, ``stale``, ``error`` or ``setup``),
+        ``error``, ``hint`` and, on success, ``data`` and ``ok_at``. Previous
+        data is kept on error.
+    """
     entry = state.get(acc["id"]) or {}
     entry["fetched_at"] = iso(utcnow())
     try:
@@ -1285,7 +2353,20 @@ def fetch_into_state(acc, state):
 
 
 def decay(m, now):
-    """Windows whose reset time passed are back to zero, even if our data is old."""
+    """Reset a metric whose window has ended, even if the data is old.
+
+    Parameters
+    ----------
+    m : dict
+        Metric from `metric`.
+    now : datetime.datetime
+
+    Returns
+    -------
+    dict
+        `m` itself, or a copy at 0 % (idle for the session) with no reset
+        time.
+    """
     reset = parse_time(m.get("resets_at"))
     if reset and reset <= now:
         m = dict(m, percent=0.0 if m.get("percent") is not None else None, resets_at=None,
@@ -1295,7 +2376,19 @@ def decay(m, now):
 
 
 def cli_command(acc):
-    """How to use this account from a terminal."""
+    """Return the shell command that uses this account from a terminal.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+
+    Returns
+    -------
+    str or None
+        E.g. ``"CLAUDE_CONFIG_DIR=~/.claude-work claude"``; None for types
+        without a CLI.
+    """
     if acc["type"] == "claude":
         return "claude" if claude_is_default_dir(acc) else f"CLAUDE_CONFIG_DIR={acc['config_dir']} claude"
     if acc["type"] == "codex":
@@ -1305,6 +2398,26 @@ def cli_command(acc):
 
 
 def build_account(acc, entry, now, sched=None):
+    """Build one account in the normalized output shape.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config.
+    entry : dict
+        The account's cached fetch from ``state.json``.
+    now : datetime.datetime
+        Used to decay metrics whose window has ended.
+    sched : dict, optional
+        Contents of ``autoping.json``.
+
+    Returns
+    -------
+    dict
+        The account with its ``status`` (``pending``, ``ok``, ``stale``,
+        ``error`` or ``setup``), capabilities, links, ``metrics``, ``notes``
+        and ``auto_ping``.
+    """
     prov = provider(acc)
     data = entry.get("data") or {}
     status = entry.get("status") or "pending"
@@ -1330,6 +2443,22 @@ def build_account(acc, entry, now, sched=None):
 
 
 def summarize(cfg, accounts):
+    """Pick the metric shown in the menu bar.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config; ``menubar`` is ``"max"`` (highest percent of all
+        accounts) or ``"ACCOUNT_ID:METRIC_KEY"``.
+    accounts : list of dict
+        Accounts from `build_account`.
+
+    Returns
+    -------
+    dict or None
+        ``percent``, ``account``, ``metric`` and ``label``; None when no
+        metric has a percent.
+    """
     pick = cfg.get("menubar") or "max"
     best = None
     for a in accounts:
@@ -1347,7 +2476,19 @@ def summarize(cfg, accounts):
 
 
 def canonical_group(cfg, name):
-    """Reuse the existing spelling of a group ("work" → "Work")."""
+    """Reuse the existing spelling of a group name (``"work"`` → ``"Work"``).
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    name : str or None
+
+    Returns
+    -------
+    str
+        The existing spelling, or `name` stripped when the group is new.
+    """
     name = (name or "").strip()
     for g in list(cfg.get("groups") or []) + [a.get("group") for a in cfg["accounts"]]:
         if g and g.casefold() == name.casefold():
@@ -1359,13 +2500,41 @@ GROUP_PALETTE = ["blue", "green", "purple", "orange", "pink", "teal", "red", "gr
 
 
 def group_colors(cfg, groups):
-    """Configured "group_colors" or a palette colour by position."""
+    """Assign a colour to each group.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config; its ``group_colors`` override the palette.
+    groups : list of str
+        Groups in display order.
+
+    Returns
+    -------
+    dict of str to str
+        Colour name by group; groups without one get a `GROUP_PALETTE` colour
+        by position.
+    """
     conf = {k.casefold(): v for k, v in (cfg.get("group_colors") or {}).items()}
     return {g: conf.get(g.casefold()) or GROUP_PALETTE[i % len(GROUP_PALETTE)] for i, g in enumerate(groups)}
 
 
 def group_rank(cfg, group):
-    """Optional config "groups": ["Work", "Personal"] fixes the order; others alphabetical; ungrouped last."""
+    """Return the sort key of a group.
+
+    Groups listed in the config's ``groups`` come first, in that order, then
+    the others alphabetically, then ungrouped accounts.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    group : str or None
+
+    Returns
+    -------
+    tuple of (int, str)
+    """
     order = [g.casefold() for g in cfg.get("groups") or []]
     if not group:
         return (2, "")
@@ -1374,6 +2543,26 @@ def group_rank(cfg, group):
 
 
 def collect(cfg, ids=None, force=False, cached=False):
+    """Refresh the accounts that are due and build the status output.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    ids : list of str, optional
+        Only these accounts; by default all accounts enabled on this device.
+    force : bool, default False
+        Refetch even when the cache is fresh.
+    cached : bool, default False
+        Never fetch; use the cache only.
+
+    Returns
+    -------
+    dict
+        The JSON document read by the UIs: ``version``, ``generated_at``,
+        ``refresh_minutes``, ``config_path``, ``summary``, ``groups``,
+        ``group_colors`` and ``accounts`` (sorted by group, then label).
+    """
     state = read_json(STATE_PATH, {}) or {}
     accounts = [a for a in cfg["accounts"] if enabled_here(a) and (not ids or a["id"] in ids)]
     now = utcnow()
@@ -1401,6 +2590,17 @@ def collect(cfg, ids=None, force=False, cached=False):
 # ───────────────────────────── CLI ──────────────────────────────────────────
 
 def human_delta(t):
+    """Format the time left until `t`, e.g. ``"2d 3h"``, ``"1h 05m"``, ``"12m"``.
+
+    Parameters
+    ----------
+    t : datetime.datetime
+
+    Returns
+    -------
+    str
+        ``"now"`` when `t` is past.
+    """
     secs = int((t - utcnow()).total_seconds())
     if secs <= 0:
         return "now"
@@ -1411,6 +2611,13 @@ def human_delta(t):
 
 
 def print_human(result):
+    """Print the status for a terminal, in colour when it is a TTY.
+
+    Parameters
+    ----------
+    result : dict
+        Output of `collect`.
+    """
     use_color = sys.stdout.isatty()
 
     def c(code, s):
@@ -1455,6 +2662,18 @@ def print_human(result):
 
 
 def cmd_status(args):
+    """``mana status``: print the usage of the accounts.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``accounts``, ``json``, ``compact``, ``force`` and ``cached``.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     cfg = load_config()
     res = collect(cfg, ids=args.accounts or None, force=args.force, cached=args.cached)
     if args.json:
@@ -1465,6 +2684,26 @@ def cmd_status(args):
 
 
 def cmd_ping(args):
+    """``mana ping``: start the session timer of accounts with a tiny prompt.
+
+    Accounts pinged successfully are refreshed afterwards.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``accounts``, ``all``, ``idle`` (only accounts with no running
+        session) and ``json``.
+
+    Returns
+    -------
+    int
+        0 when every ping succeeded, else 1.
+
+    Raises
+    ------
+    SystemExit
+        When no selection is given, or an account is unknown.
+    """
     cfg = load_config()
     accs = [a for a in cfg["accounts"] if enabled_here(a) and provider(a)["ping"] and a.get("ping") is not False]
     if args.accounts:
@@ -1493,6 +2732,22 @@ def cmd_ping(args):
 
 
 def cmd_auto_ping(args):
+    """``mana auto-ping``: run the scheduled pings that are due.
+
+    One run at a time: a run that finds another one going returns at once.
+    With ``--dismiss``, drops the missed-ping questions of the given
+    accounts instead.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``dismiss`` and ``json``.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     cfg = load_config()
     if args.dismiss:  # "wait for the next scheduled time"
         with schedule_state() as s:
@@ -1525,6 +2780,18 @@ def cmd_auto_ping(args):
 
 
 def cmd_init(args):
+    """``mana init``: write a starter config with the detected accounts.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``force``: overwrite an existing config.
+
+    Returns
+    -------
+    int
+        1 when the config exists and ``--force`` is not given, else 0.
+    """
     if os.path.exists(CONFIG_PATH) and not args.force:
         print(f"{CONFIG_PATH} already exists (use --force to overwrite)")
         return 1
@@ -1535,12 +2802,38 @@ def cmd_init(args):
 
 
 def cmd_paths(_args):
+    """``mana paths``: print the config, secrets and cache locations as JSON.
+
+    Parameters
+    ----------
+    _args : argparse.Namespace
+        Unused.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     print(json.dumps({"config": CONFIG_PATH, "secrets": SECRETS_PATH, "state": STATE_PATH,
                       "python": sys.executable, "version": VERSION}, indent=2))
     return 0
 
 
 def main(argv=None):
+    """Parse the command line and run a ``mana`` subcommand.
+
+    Without a subcommand, runs ``status`` with the given arguments.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Arguments; defaults to ``sys.argv[1:]``.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
     ap = argparse.ArgumentParser(prog="mana", description="Coding-assistant credits & limits tracker")
     ap.add_argument("--version", action="version", version=VERSION)
     sub = ap.add_subparsers(dest="cmd")
