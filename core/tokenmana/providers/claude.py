@@ -6,12 +6,14 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 
 from ..constants import IS_MAC, SESSION_WINDOW, WEEK_WINDOW
 from ..errors import ApiError, ProviderError
 from ..metrics import metric
 from ..net import http_json
-from ..util import expand, first_of_next_month, fmt_money, keychain_read, parse_time, read_json, utcnow
+from ..util import (expand, first_of_next_month, fmt_money, keychain_read, parse_time, read_json, tool_env,
+                    utcnow, which)
 
 
 CLAUDE_BETA = "oauth-2025-04-20"
@@ -82,6 +84,26 @@ def claude_is_default_dir(acc):
     return os.path.realpath(claude_dir(acc)) == os.path.realpath(expand("~/.claude"))
 
 
+def claude_cli_env(acc):
+    """Build the environment for running the ``claude`` CLI as this account.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"claude"``.
+
+    Returns
+    -------
+    dict of str to str
+        `tool_env` with ``CLAUDE_CONFIG_DIR`` set to the account's config dir
+        (unset for the default one) and without API keys or cloud providers,
+        so that the subscription login is used.
+    """
+    return tool_env(ANTHROPIC_API_KEY=None, ANTHROPIC_AUTH_TOKEN=None, CLAUDE_CODE_USE_BEDROCK=None,
+                    CLAUDE_CODE_USE_VERTEX=None,
+                    CLAUDE_CONFIG_DIR=None if claude_is_default_dir(acc) else claude_dir(acc))
+
+
 def claude_credentials(acc):
     """Read the Claude Code OAuth credentials of an account.
 
@@ -136,6 +158,37 @@ def claude_credentials(acc):
         raise ProviderError("Unreadable Claude credentials") from None
 
 
+def claude_renew_login(acc):
+    """Have Claude Code renew the account's expired OAuth token.
+
+    ``claude auth status`` refreshes an expired access token with the stored
+    refresh token and saves the new one where Claude Code keeps it. It sends
+    no prompt, so it uses no quota and starts no session; offline, it leaves
+    the credentials untouched.
+
+    Parameters
+    ----------
+    acc : dict
+        Account config of type ``"claude"``.
+
+    Returns
+    -------
+    bool
+        True when the CLI ran and exited successfully (the token may still
+        be expired, e.g. when the refresh token was revoked).
+    """
+    exe = which("claude", acc.get("claude_bin"))
+    if not exe:
+        return False
+    with tempfile.TemporaryDirectory(prefix="mana-auth-") as cwd:
+        try:
+            p = subprocess.run([exe, "auth", "status", "--json"], capture_output=True, text=True, timeout=30,
+                               env=claude_cli_env(acc), cwd=cwd, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    return p.returncode == 0
+
+
 def claude_keychain_services():
     """List the Claude Code credential items in the macOS keychain.
 
@@ -176,7 +229,8 @@ def claude_identity(acc):
 def fetch_claude(acc):
     """Fetch the plan limits of a Claude Pro / Max account.
 
-    Calls the OAuth usage endpoint with Claude Code's token. Reads the
+    Calls the OAuth usage endpoint with Claude Code's token, renewed first
+    through `claude_renew_login` when it has expired. Reads the
     ``limits`` list when present, else the older ``five_hour`` /
     ``seven_day*`` fields, plus the extra-usage spend when enabled.
 
@@ -197,10 +251,14 @@ def fetch_claude(acc):
         fails.
     """
     tok = claude_credentials(acc)
+    exp = parse_time(tok.get("expiresAt"))
+    # Expired while the device slept or Claude Code went unused: let Claude Code renew it.
+    if tok.get("accessToken") and exp and exp < utcnow() and claude_renew_login(acc):
+        tok = claude_credentials(acc)
+        exp = parse_time(tok.get("expiresAt"))
     access = tok.get("accessToken")
     if not access:
         raise ProviderError("No OAuth token (API-key login?)", setup=True)
-    exp = parse_time(tok.get("expiresAt"))
     if exp and exp < utcnow():
         raise ProviderError("Login token expired (Claude Code refreshes it on next use)",
                             hint="Use Claude Code once, or Ping this account")

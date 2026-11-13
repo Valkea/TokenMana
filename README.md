@@ -288,8 +288,10 @@ written to the cache or printed.
 
 - The Claude, Codex and Copilot usage endpoints are the ones their own clients use. They are not
   public APIs and may change; if a provider breaks, the fix goes in its module in `core/tokenmana/providers/`.
-- When a login token has expired, the card keeps the last data (marked ⚠). Windows whose reset time
-  has passed drop to 0 / *idle*. Using the tool once, or pinging it, refreshes the token.
+- An expired Claude login token (e.g. after a night asleep) is renewed on the next refresh by running
+  `claude auth status`, which sends no prompt. If that fails (offline, no `claude` CLI, revoked login) the
+  card keeps the last data (marked ⚠); windows whose reset time has passed drop to 0 / *idle*. Using
+  the tool once, or pinging it, refreshes the token.
 
 ## License
 

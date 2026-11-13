@@ -10,7 +10,7 @@ import time
 from .config import enabled_here
 from .constants import SCHEDULE_PATH, STATE_PATH
 from .errors import ProviderError
-from .providers.claude import claude_dir, claude_is_default_dir
+from .providers.claude import claude_cli_env
 from .providers.codex import codex_home
 from .schedule import AUTO_PING_RETRY, auto_ping_conf, auto_ping_step, next_slot, schedule_state
 from .status import collect
@@ -55,10 +55,7 @@ def ping_command(acc):
             argv += ["--effort", p.get("effort", "low")]
         argv += ["--tools", "", "--strict-mcp-config", "--no-session-persistence",
                  "--disable-slash-commands", "--setting-sources", "project"] + list(p.get("extra_args", [])) + [prompt]
-        env = tool_env(ANTHROPIC_API_KEY=None, ANTHROPIC_AUTH_TOKEN=None, CLAUDE_CODE_USE_BEDROCK=None,
-                       CLAUDE_CODE_USE_VERTEX=None,
-                       CLAUDE_CONFIG_DIR=None if claude_is_default_dir(acc) else claude_dir(acc))
-        return argv, env
+        return argv, claude_cli_env(acc)
     if t == "codex":
         exe = which("codex", acc.get("codex_bin"))
         if not exe:
