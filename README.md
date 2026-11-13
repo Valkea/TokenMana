@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/Valkea/TokenMana/main/install.sh | 
 wget -qO- https://raw.githubusercontent.com/Valkea/TokenMana/main/install.sh | bash     # Ubuntu
 ```
 
-Run it again to update. `… | TOKENMANA_VERSION=v0.2.0 bash` installs a given version. From a clone:
+Run it again to update. `… | TOKENMANA_VERSION=v0.2.2 bash` installs a given version. From a clone:
 
 ```sh
 ./install.sh          # macOS: builds + installs ~/Applications/TokenMana.app

@@ -5,7 +5,7 @@
 #
 # From a checkout: ./install.sh
 # Without one:     curl -fsSL https://raw.githubusercontent.com/Valkea/TokenMana/main/install.sh | bash
-#                  (wget -qO- … | bash on Ubuntu; TOKENMANA_VERSION=v0.2.0 picks a version, default: latest)
+#                  (wget -qO- … | bash on Ubuntu; TOKENMANA_VERSION=v0.2.2 picks a version, default: latest)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 
