@@ -9,7 +9,7 @@ import os
 import sys
 
 
-VERSION = "0.2.2"
+VERSION = "0.2.4"
 IS_MAC = sys.platform == "darwin"
 HOME = os.path.expanduser("~")
 
