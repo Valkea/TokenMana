@@ -251,8 +251,11 @@ def auto_ping_step(conf, entry, e, now):
     busy = session_busy_until(entry)
     running = busy is not None and now < busy
     if conf["mode"] == "interval":
+        if running:  # a session is already going (started by use or a manual ping): drop an old failure
+            e.update(error=None, retry_at=None)
+            return None
         last, retry = parse_time(e.get("last_ping")), parse_time(e.get("retry_at"))
-        if running or (retry and now < retry) or (last and now < last + dt.timedelta(seconds=AUTO_PING_GAP)):
+        if (retry and now < retry) or (last and now < last + dt.timedelta(seconds=AUTO_PING_GAP)):
             return None
         return now
     handled = parse_time(e.get("handled_until")) or now
