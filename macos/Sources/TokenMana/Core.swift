@@ -42,22 +42,24 @@ enum Core {
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
+        // Not waitUntilExit(): on a GCD thread it spins a run loop that can miss the exit
+        // and block forever, which left `autoPinging` stuck and stopped the auto pings.
+        let outBox = DataBox(), errBox = DataBox()
+        let group = DispatchGroup()
+        group.enter()
+        p.terminationHandler = { _ in group.leave() }
         try p.run()
-        return try await withCheckedThrowingContinuation { cont in
+        for (pipe, box) in [(out, outBox), (err, errBox)] {
+            group.enter()
             DispatchQueue.global().async {
-                let errBox = DataBox()
-                let reader = DispatchQueue.global()
-                let group = DispatchGroup()
-                group.enter()
-                reader.async {
-                    errBox.data = err.fileHandleForReading.readDataToEndOfFile()
-                    group.leave()
-                }
-                let outData = out.fileHandleForReading.readDataToEndOfFile()
-                group.wait()
-                p.waitUntilExit()
-                if !outData.isEmpty {
-                    cont.resume(returning: outData)
+                box.data = pipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+        }
+        return try await withCheckedThrowingContinuation { cont in
+            group.notify(queue: .global()) {
+                if !outBox.data.isEmpty {
+                    cont.resume(returning: outBox.data)
                 } else {
                     let msg = String(decoding: errBox.data, as: UTF8.self)
                         .split(separator: "\n").last.map(String.init) ?? "mana exited with \(p.terminationStatus)"
