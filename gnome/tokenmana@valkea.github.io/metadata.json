@@ -9,7 +9,7 @@
     "48",
     "49"
   ],
-  "version-name": "0.2.4",
+  "version-name": "0.2.6",
   "url": "https://github.com/Valkea/TokenMana",
   "settings-schema": "org.gnome.shell.extensions.tokenmana"
 }
