@@ -115,7 +115,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// Everything that changes the list of items (not just the numbers in them).
     private func structureSignature() -> String {
         var parts = [store.groups.joined(separator: ","), "\(store.status?.groupColors ?? [:])", store.loadError ?? "", "\(store.refreshing)", "\(showPercent)", panelAccount, "\(store.launchAtLogin)",
-                     "\(store.status == nil)"]
+                     "\(store.status == nil)", store.status?.app.map { "\($0.version)>\($0.latest ?? "")" } ?? ""]
         for a in store.status?.accounts ?? [] {
             var auto = ""
             if let ap = a.autoPing { auto = [Fmt.autoPing(ap, now: store.now), ap.missed ?? "", ap.error ?? ""].joined(separator: "/") }
@@ -186,6 +186,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let refresh = action(store.refreshing ? "Refreshing…" : "Refresh", #selector(refresh), key: "r",
                              symbol: "arrow.clockwise")
         refresh.isEnabled = !store.refreshing
+        let app = store.status?.app
+        if let app, app.updateAvailable, let latest = app.latest {
+            refresh.badge = NSMenuItemBadge(string: "Update")
+            refresh.toolTip = "\(app.name) \(latest) is available: see the bottom of this menu"
+        }
         let add = action("Add Account…", #selector(showAddAccount), key: "n", symbol: "plus")
         let settings = settingsItem()
         for item in [refresh, add, settings] {
@@ -193,7 +198,20 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        if let app {
+            menu.addItem(versionItem(app))
+        }
         menu.addItem(action("Quit TokenMana", #selector(quit), key: "q"))
+    }
+
+    /// "TokenMana 0.2.4", or "Update to 0.2.5…" opening the distribution's install page.
+    private func versionItem(_ app: AppInfo) -> NSMenuItem {
+        guard app.updateAvailable, let latest = app.latest else { return disabled("\(app.name) \(app.version)") }
+        let item = action("Update to \(latest)…", #selector(openURL(_:)), represented: app.updatePage,
+                          symbol: "arrow.down.circle.fill")
+        item.image = img(MenuIcons.symbol("arrow.down.circle.fill", .controlAccentColor))
+        if #available(macOS 14.4, *) { item.subtitle = "\(app.name) \(app.version) installed" }
+        return item
     }
 
     private func setHeaderSubtitle(_ item: NSMenuItem) {

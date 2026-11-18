@@ -15,7 +15,7 @@ from .config import (
     secrets_load, slugify, update_account,
 )
 from .constants import (
-    CACHE_DIR, CONFIG_PATH, DEFAULT_REFRESH_MIN, IS_MAC, SCHEDULE_PATH, SECRETS_PATH, STATE_PATH, VERSION,
+    CACHE_DIR, CONFIG_PATH, DEFAULT_REFRESH_MIN, IS_MAC, SCHEDULE_PATH, SECRETS_PATH, STATE_PATH,
 )
 from .errors import ApiError, ProviderError
 from .login import emit, login_cli, login_copilot
@@ -26,6 +26,7 @@ from .providers.codex import codex_home
 from .providers.copilot import copilot_host, normalize_host
 from .schedule import parse_auto_ping, record_pings, schedule_state
 from .status import GROUP_PALETTE, collect
+from .update import distribution
 from .util import expand, parse_time, read_json, tool_env, utcnow, which, write_json
 
 
@@ -99,6 +100,10 @@ def print_human(result):
         if a.get("error"):
             print(f"  {c('31', '! ' + a['error'])}" + (f"  {c('2', '→ ' + a['hint'])}" if a.get("hint") else ""))
         print()
+    app = result.get("app") or {}
+    if app.get("update_available"):
+        print(c("33", f"⬆ {app['name']} {app['latest']} is available (installed: {app['version']})")
+              + f"  {c('2', '→ ' + app['update_page'])}")
 
 
 def cmd_status(args):
@@ -533,7 +538,7 @@ def cmd_paths(_args):
         Exit code.
     """
     print(json.dumps({"config": CONFIG_PATH, "secrets": SECRETS_PATH, "state": STATE_PATH,
-                      "python": sys.executable, "version": VERSION}, indent=2))
+                      "python": sys.executable, "version": distribution()["version"]}, indent=2))
     return 0
 
 
@@ -553,7 +558,7 @@ def main(argv=None):
         Exit code.
     """
     ap = argparse.ArgumentParser(prog="mana", description="Coding-assistant credits & limits tracker")
-    ap.add_argument("--version", action="version", version=VERSION)
+    ap.add_argument("--version", action="version", version=str(distribution()["version"]).lstrip("v"))
     sub = ap.add_subparsers(dest="cmd")
     s = sub.add_parser("status", help="show usage for all accounts")
     s.add_argument("accounts", nargs="*")

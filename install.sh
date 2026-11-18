@@ -6,6 +6,7 @@
 # From a checkout: ./install.sh
 # Without one:     curl -fsSL https://raw.githubusercontent.com/Valkea/TokenMana/main/install.sh | bash
 #                  (wget -qO- … | bash on Ubuntu; TOKENMANA_VERSION=v0.2.4 picks a version, default: latest)
+# TOKENMANA_DISTRIBUTION=/abs/path/distribution.json: where a derived distribution checks for updates.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 
@@ -56,6 +57,8 @@ cp "$ROOT/core/mana.py" "$DEST/mana.py"
 rm -rf "$DEST/tokenmana"  # drop modules an older version had
 cp -R "$ROOT/core/tokenmana" "$DEST/tokenmana"
 find "$DEST/tokenmana" -name __pycache__ -prune -exec rm -rf {} +
+# A derived distribution's update source (see core/tokenmana/update.py).
+[ -n "${TOKENMANA_DISTRIBUTION:-}" ] && cp "$TOKENMANA_DISTRIBUTION" "$DEST/tokenmana/distribution.json"
 glib-compile-schemas "$DEST/schemas"
 
 cat > "$HOME/.local/bin/mana" <<EOF

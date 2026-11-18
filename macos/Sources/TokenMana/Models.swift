@@ -9,12 +9,22 @@ struct StatusResult: Decodable {
     let groups: [String]?
     let groupColors: [String: String]?
     let accounts: [Account]
+    let app: AppInfo?
 
     static func decode(_ data: Data) throws -> StatusResult {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(StatusResult.self, from: data)
     }
+}
+
+/// Installed version and the latest one (public tags, or a derived distribution's own repo).
+struct AppInfo: Decodable {
+    let name: String
+    let version: String
+    let latest: String?
+    let updateAvailable: Bool
+    let updatePage: String?
 }
 
 struct Summary: Decodable {

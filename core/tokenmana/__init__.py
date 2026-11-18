@@ -20,6 +20,8 @@ providers
     One module per account type, and the registry.
 schedule
     Auto-ping schedules and their state file.
+update
+    The installed version and the check for a newer one.
 status
     Fetching, caching and the status document the UIs read.
 ping

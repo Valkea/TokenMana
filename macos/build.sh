@@ -14,6 +14,8 @@ cp Info.plist "$APP/Contents/"
 cp ../core/mana.py "$APP/Contents/Resources/"
 cp -R ../core/tokenmana "$APP/Contents/Resources/"
 find "$APP/Contents/Resources/tokenmana" -name __pycache__ -prune -exec rm -rf {} +
+# A derived distribution's update source (see core/tokenmana/update.py).
+[[ -n "${TOKENMANA_DISTRIBUTION:-}" ]] && cp "$TOKENMANA_DISTRIBUTION" "$APP/Contents/Resources/tokenmana/distribution.json"
 codesign --force --sign - "$APP" >/dev/null
 echo "built $APP"
 

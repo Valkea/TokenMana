@@ -688,6 +688,15 @@ const Indicator = GObject.registerClass({
             this._addForm = this._addForm ? null : {type: 'claude', label: '', command: '', host: '', group: ''};
             this._render();
         }));
+        const app = this._status?.app;
+        if (app?.update_available && app.latest) {
+            const update = textButton(`⬆ ${app.latest}`, () => {
+                this.menu.close();
+                openUri(app.update_page);
+            }, 'ct-update');
+            update.accessible_name = `${app.name} ${app.latest} is available (installed: ${app.version})`;
+            row.add_child(update);
+        }
         row.add_child(iconButton(this._refreshing ? 'content-loading-symbolic' : 'view-refresh-symbolic',
             'Refresh all accounts', () => this._refreshAll()));
         this._item(row);
@@ -1048,6 +1057,9 @@ const Indicator = GObject.registerClass({
         const row = new St.BoxLayout({style_class: 'ct-row', x_expand: true});
         let text = this._error ? `⚠ ${this._error}` : (this._lastLoaded ? `Updated ${clock(this._lastLoaded, new Date())}` : '');
         row.add_child(label(text, this._error ? 'ct-error' : 'ct-dim', {x_expand: true, wrap: !!this._error}));
+        const app = this._status?.app;
+        if (app)
+            row.add_child(label(`${app.name} ${app.version}`, 'ct-faint'));
         this._item(row);
     }
 

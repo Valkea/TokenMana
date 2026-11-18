@@ -12,6 +12,7 @@ from .providers import provider
 from .providers.claude import claude_is_default_dir
 from .providers.copilot import copilot_host
 from .schedule import auto_ping_info
+from .update import app_info
 from .util import expand, iso, parse_time, read_json, utcnow, write_json
 
 
@@ -232,7 +233,8 @@ def collect(cfg, ids=None, force=False, cached=False):
     dict
         The JSON document read by the UIs: ``version``, ``generated_at``,
         ``refresh_minutes``, ``config_path``, ``summary``, ``groups``,
-        ``group_colors`` and ``accounts`` (sorted by group, then label).
+        ``group_colors``, ``accounts`` (sorted by group, then label) and
+        ``app`` (installed and latest version, from `app_info`).
     """
     state = read_json(STATE_PATH, {}) or {}
     accounts = [a for a in cfg["accounts"] if enabled_here(a) and (not ids or a["id"] in ids)]
@@ -243,9 +245,10 @@ def collect(cfg, ids=None, force=False, cached=False):
             last = parse_time((state.get(a["id"]) or {}).get("fetched_at"))
             if force or not last or (now - last).total_seconds() >= refresh_seconds(a, cfg) - 5:
                 due.append(a)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        app = pool.submit(app_info, cfg, check=not cached)  # alongside the fetches: adds no wait
+        list(pool.map(lambda a: fetch_into_state(a, state), due))
     if due:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(lambda a: fetch_into_state(a, state), due))
         write_json(STATE_PATH, state)
     now = utcnow()
     sched = read_json(SCHEDULE_PATH, {}) or {}
@@ -255,4 +258,4 @@ def collect(cfg, ids=None, force=False, cached=False):
                     key=lambda g: group_rank(cfg, g))
     return {"version": 1, "generated_at": iso(now), "refresh_minutes": cfg.get("refresh_minutes", DEFAULT_REFRESH_MIN),
             "config_path": CONFIG_PATH, "summary": summarize(cfg, out), "groups": groups,
-            "group_colors": group_colors(cfg, groups), "accounts": out}
+            "group_colors": group_colors(cfg, groups), "accounts": out, "app": app.result()}

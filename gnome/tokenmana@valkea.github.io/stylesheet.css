@@ -54,6 +54,8 @@
 .ct-btn:hover { background-color: rgba(127, 127, 127, 0.32); }
 .ct-btn-selected { background-color: #3584e4; color: #fff; }
 .ct-btn-danger { background-color: #e01b24; color: #fff; }
+.ct-update { padding: 2px 8px; border-radius: 99px; font-size: 8.5pt; font-weight: bold; background-color: #3584e4; color: #fff; }
+.ct-update:hover { background-color: #4a90e8; }
 
 .ct-question { padding: 8px 10px; border-radius: 8px; background-color: rgba(255, 179, 64, 0.14); spacing: 6px; }
 

@@ -93,6 +93,11 @@ Only changes to `extension.js`, `metadata.json` or the settings schema need a lo
 
 macOS needs only the Xcode Command Line Tools (no Xcode). Turn on *Settings → Launch at Login* in the menu.
 
+The installed version is shown at the bottom of the menu. When a newer release is tagged, an *Update* badge
+appears on *Refresh* (macOS) or a ⬆ button next to the refresh button (GNOME), and `mana status` says so; it
+opens the install instructions. TokenMana checks the repo's tags at most every 12 h; `"check_updates": false`
+in the config turns this off.
+
 ## Accounts
 
 Add as many accounts of each type as you like: **Add Account… (⌘N)** in the menu (macOS), the add
@@ -219,7 +224,22 @@ code), or exits non-zero: the first line of stderr is then the error. An account
 Add `"setup": true` to an error that means "not set up on this device".
 
 Organisations can ship such commands, with an installer that runs this repo's `install.sh` and adds the
-accounts, in a separate internal repo. TokenMana itself then needs no changes for them.
+accounts, in a separate internal repo. TokenMana itself then needs no changes for them. To have the update
+notice follow that repo instead of this one, its installer runs `TOKENMANA_DISTRIBUTION=/abs/path/distribution.json
+install.sh` with:
+
+```json
+{
+  "name": "TokenMana · internal",
+  "update_url": "https://ghe.example.com/api/v3/repos/org/repo/contents/upstream.version?ref=main",
+  "update_page": "https://ghe.example.com/org/repo#install",
+  "update_token_cmd": "gh auth token --hostname ghe.example.com"
+}
+```
+
+The highest `vX.Y.Z` found at `update_url` (a text file, a tags feed, a page) is the latest version.
+`update_token_cmd` is optional: it prints a token for a private repo. `version` overrides the version shown and
+compared, for a distribution with its own numbering.
 
 ## Settings and backup
 
@@ -280,6 +300,7 @@ name a command or a variable, not the token itself.
 | `command` / `login_hint` | `command` accounts: what to run, and the hint shown when it fails |
 | `vendor` | badge of the account (`anthropic`, `openai`, `github`, `bedrock`, `command`) |
 | `dashboard_url` | override (or `null` to hide) the "open usage page" button |
+| `check_updates` | `false`: never check for a newer TokenMana version |
 
 Claude/Codex tokens are read where those CLIs keep them, only to call the usage endpoints. They are never
 written to the cache or printed.
