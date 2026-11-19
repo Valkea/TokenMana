@@ -119,10 +119,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         for a in store.status?.accounts ?? [] {
             var auto = ""
             if let ap = a.autoPing { auto = [Fmt.autoPing(ap, now: store.now), ap.missed ?? "", ap.error ?? ""].joined(separator: "/") }
-            parts.append([a.id, a.label, a.group ?? "", a.status, a.plan ?? "", a.identity ?? "", a.error ?? "", a.hint ?? "",
-                          a.metrics.map { "\($0.key)\($0.idle)\(Fmt.resetLine($0, now: store.now) != nil)" }.joined(),
-                          a.notes.joined(), "\(store.pinging.contains(a.id))", store.pingMessages[a.id]?.text ?? "", auto]
-                .joined(separator: "|"))
+            let metricsSig: String = a.metrics.map { "\($0.key)\($0.idle)\(Fmt.resetLine($0, now: store.now) != nil)" }.joined()
+            let pingMsg: String = store.pingMessages[a.id]?.text ?? ""
+            let fields: [String] = [a.id, a.label, a.group ?? "", a.status, a.plan ?? "", a.identity ?? "", a.error ?? "", a.hint ?? "",
+                                    metricsSig, a.notes.joined(), "\(store.pinging.contains(a.id))", pingMsg, auto]
+            parts.append(fields.joined(separator: "|"))
         }
         return parts.joined(separator: "\n")
     }
