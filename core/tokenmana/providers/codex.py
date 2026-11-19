@@ -151,6 +151,13 @@ def fetch_codex(acc):
         mkey = "session" if secs == SESSION_WINDOW else ("weekly" if secs and abs(secs - WEEK_WINDOW) < 3600 else key)
         metrics.append(metric(mkey, window_label(secs, key.replace("_", " ").title()), w["used_percent"],
                               resets_at=reset, window=secs))
+    sc = (d.get("spend_control") or {}).get("individual_limit") or {}
+    if sc.get("used_percent") is not None:  # Business workspaces with spend controls have no rate_limit windows
+        try:
+            text = f"{float(sc['used']):,.0f} / {float(sc['limit']):,.0f}"
+        except (KeyError, TypeError, ValueError):
+            text = None
+        metrics.append(metric("budget", "Credits", sc["used_percent"], text=text, resets_at=sc.get("reset_at")))
     notes = []
     if rl.get("limit_reached"):
         notes.append("Rate limit reached")
