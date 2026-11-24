@@ -1,0 +1,16 @@
+# Development settings only. TokenMana itself has no dependencies: the core is
+# Python 3.9+ standard library, and install.sh ships core/mana.py and
+# core/tokenmana/ alone.
+#
+# Run the core tests from the repository root:
+#     uvx pytest                                         (nothing to install)
+#     python3 -m pip install pytest && python3 -m pytest
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["core/tests"]
+pythonpath = ["core"]
+addopts = ["-ra", "--strict-markers"]
