@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 NEW="${1:?usage: scripts/release.sh X.Y.Z}"
 [[ "$NEW" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "not a version: $NEW (no leading v)" >&2; exit 1; }
-[ -z "$(git status --porcelain)" ] || { echo "commit or stash your changes first" >&2; exit 1; }
+[ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "commit or stash your tracked changes first" >&2; exit 1; }
 git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null && { echo "tag v$NEW already exists" >&2; exit 1; }
 OLD="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' core/tokenmana/constants.py)"
 [ -n "$OLD" ] || { echo "VERSION not found in core/tokenmana/constants.py" >&2; exit 1; }
