@@ -66,7 +66,7 @@ def test_auto_ping_run_records_each_outcome_for_its_mode(monkeypatch):
         ok = acc["id"] == "ok"
         return {"id": acc["id"], "ok": ok, "seconds": 1.0, **({} if ok else {"error": "boom"})}
 
-    collect = mock.Mock()
+    collect = mock.Mock(return_value={"accounts": []})
     monkeypatch.setattr(ping, "utcnow", lambda: now)
     monkeypatch.setattr(ping, "ping_account", fake_ping)
     monkeypatch.setattr(ping, "collect", collect)
@@ -85,3 +85,28 @@ def test_auto_ping_run_records_each_outcome_for_its_mode(monkeypatch):
     assert res["missed"] == [{"id": "times", "label": "times", "slot": iso(local(2026, 1, 15, 8, 0)),
                               "error": "boom", "next": iso(local(2026, 1, 16, 8, 0))}]
     collect.assert_called_once_with(cfg, ids=["ok"], force=True)  # refresh what was pinged
+
+
+def test_refresh_after_ping_waits_for_the_new_session(monkeypatch):
+    def acc(i, idle):
+        return {"id": i, "metrics": [{"key": "session", "idle": idle}, {"key": "weekly_all", "idle": False}]}
+
+    # The usage API still says idle right after the ping, then catches up.
+    replies = iter([{"accounts": [acc("a", True), acc("b", False)]}, {"accounts": [acc("a", True)]},
+                    {"accounts": [acc("a", False)]}])
+    collect = mock.Mock(side_effect=lambda cfg, ids, force: next(replies))
+    sleeps = []
+    monkeypatch.setattr(ping, "collect", collect)
+    monkeypatch.setattr(ping.time, "sleep", sleeps.append)
+    ping.refresh_after_ping({}, ["a", "b"])
+
+    assert [c.kwargs["ids"] for c in collect.call_args_list] == [["a", "b"], ["a"], ["a"]]
+    assert sleeps == list(ping.PING_REFRESH_DELAYS[:3])
+
+
+def test_refresh_after_ping_gives_up_after_the_last_try(monkeypatch):
+    collect = mock.Mock(return_value={"accounts": [{"id": "a", "metrics": [{"key": "session", "idle": True}]}]})
+    monkeypatch.setattr(ping, "collect", collect)
+    monkeypatch.setattr(ping.time, "sleep", lambda s: None)
+    ping.refresh_after_ping({}, ["a"])
+    assert collect.call_count == len(ping.PING_REFRESH_DELAYS)

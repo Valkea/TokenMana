@@ -8,7 +8,6 @@ import json
 import os
 import re
 import sys
-import time
 
 from .config import (
     ACCOUNT_TYPES, autodetect_accounts, canonical_group, enabled_here, find_account, load_config,
@@ -19,7 +18,7 @@ from .constants import (
 )
 from .errors import ApiError, ProviderError
 from .login import emit, login_cli, login_copilot
-from .ping import ping_account, run_auto_pings
+from .ping import ping_account, refresh_after_ping, run_auto_pings
 from .providers import PROVIDERS, provider
 from .providers.claude import claude_dir, claude_is_default_dir, claude_keychain_services
 from .providers.codex import codex_home
@@ -164,8 +163,7 @@ def cmd_ping(args):
         results = list(pool.map(ping_account, accs))
     record_pings(results)
     if any(r["ok"] for r in results):
-        time.sleep(2)
-        collect(cfg, ids=[r["id"] for r in results if r["ok"]], force=True)
+        refresh_after_ping(cfg, [r["id"] for r in results if r["ok"]])
     if args.json:
         print(json.dumps({"results": results}))
     else:

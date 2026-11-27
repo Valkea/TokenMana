@@ -18,6 +18,9 @@ from .util import iso, read_json, tool_env, utcnow, which
 
 
 PING_PROMPT = "Health check. Reply with the single word: pong"
+# The usage API can still report the session as idle for a while after a ping that
+# started it: refetch with these waits (seconds) until the session shows as running.
+PING_REFRESH_DELAYS = (2, 4, 8, 15, 15)
 
 
 def ping_command(acc):
@@ -103,6 +106,31 @@ def ping_account(acc):
     return res
 
 
+def refresh_after_ping(cfg, ids):
+    """Refresh pinged accounts until their new session shows up.
+
+    Right after a ping the usage API may still report the 5 h session as
+    idle; a single early refetch would leave that in the cache (and the UIs)
+    until the next scheduled refresh. Refetches with `PING_REFRESH_DELAYS`
+    between tries, dropping each account once its session is running.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    ids : list of str
+        Accounts that were pinged successfully.
+    """
+    pending = list(ids)
+    for delay in PING_REFRESH_DELAYS:
+        if not pending:
+            return
+        time.sleep(delay)
+        status = collect(cfg, ids=pending, force=True)
+        pending = [a["id"] for a in status["accounts"]
+                   if any(m["key"] == "session" and m.get("idle") for m in a.get("metrics") or [])]
+
+
 def run_auto_pings(cfg):
     """Run the auto pings that are due and report the missed ones.
 
@@ -153,8 +181,7 @@ def run_auto_pings(cfg):
                     e.update(error=r.get("error"), retry_at=iso(done + dt.timedelta(seconds=AUTO_PING_RETRY)))
         ok = [r["id"] for r in results if r["ok"]]
         if ok:
-            time.sleep(2)
-            collect(cfg, ids=ok, force=True)
+            refresh_after_ping(cfg, ok)
     sched = read_json(SCHEDULE_PATH, {}) or {}
     now = utcnow()
     missed = [{"id": i, "label": a.get("label") or i, "slot": sched[i]["missed"], "error": sched[i].get("error"),
